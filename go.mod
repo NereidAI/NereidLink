@@ -17,7 +17,7 @@ require (
 	github.com/nats-io/nats.go v1.54.0
 	github.com/plgd-dev/go-coap/v3 v3.5.4
 	github.com/prometheus/client_golang v1.24.1
-	github.com/prometheus/client_model v0.6.2
+	github.com/prometheus/client_model v0.6.3
 	github.com/rabbitmq/amqp091-go v1.15.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/spf13/cobra v1.10.2
