@@ -1,0 +1,24 @@
+{{- /*
+Copyright (C) 2026 YIQISOFT
+SPDX-License-Identifier: Apache-2.0
+
+ClusterIP Service for the stateless frontend nginx pods. The distinct
+name label keeps these endpoints out of the backend Service (its selector
+carries no component discriminator).
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nereidlink.frontendName" . }}
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "nereidlink.frontendName" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.frontend.service.port }}
+      targetPort: http

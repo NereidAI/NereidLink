@@ -1,0 +1,51 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+.tmp/
+
+# Go
+/bin/
+*.test
+*.out
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Web dependencies and build output (dist/.gitkeep is force-kept)
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+web/tsconfig.tsbuildinfo
+
+# Device mTLS private PKI (CA keys never committed)
+configs/pki/
+
+# License vendor Ed25519 signing key: only the public verification key is
+# committed. The private key signs licenses offline and must never be shipped.
+configs/license/private/
+
+# Kubernetes CLI hand-off: generated admin credentials, signed licenses and
+# deployment logs stay local to the operator workstation.
+deploy/kubernetes/.runtime/
+
+# Python bytecode from the device simulators in deploy/simulator
+__pycache__/
+*.pyc
+
+# Scratch key material testers may drop next to a simulator (never commit)
+deploy/simulator/*.pem
+deploy/simulator/*.key
+
+# Local planning artifacts (tickets, agent work notes)
+.scratch/
+
+# Parallel-agent git worktrees
+.worktrees/
+
+# Local runtime data (local blob backend, etc.)
+data/
+
+# Local build acceleration fragment (treaty §19.3); use local.mk.example
+/local.mk

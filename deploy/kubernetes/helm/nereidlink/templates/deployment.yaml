@@ -1,0 +1,206 @@
+{{- /*
+Copyright (C) 2026 YIQISOFT
+SPDX-License-Identifier: Apache-2.0
+
+The all-in-one NereidLink process. Init containers (1) idempotently provision
+the device PKI/KEK directory on the persistent volume and (2) apply embedded
+schema migrations. Kubernetes retries the migration step until PostgreSQL is
+ready, so no explicit wait/sleep is needed.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nereidlink.fullname" . }}
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+{{ include "nereidlink.selectorLabels" . | indent 6 }}
+  {{- if gt (int .Values.replicaCount) 1 }}
+  # Multiple pods share one RWX volume, so rolling updates are safe; surge
+  # keeps the previous pod serving until the new one passes readiness.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  {{- else }}
+  strategy:
+    type: Recreate
+  {{- end }}
+  template:
+    metadata:
+      labels:
+{{ include "nereidlink.selectorLabels" . | indent 8 }}
+        app.kubernetes.io/component: app
+      annotations:
+        # Roll pods when either rendered config layer changes.
+        checksum/config-base: {{ include (print $.Template.BasePath "/config-configmap.yaml") . | sha256sum }}
+        checksum/config-secret: {{ include (print $.Template.BasePath "/config-secret.yaml") . | sha256sum }}
+    spec:
+      imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 8 }}
+      # distroless nonroot is uid/gid 65532; fsGroup makes the NFS-backed
+      # persistent volume writable for the PKI/KEK material.
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      {{- if gt (int .Values.replicaCount) 1 }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+{{ include "nereidlink.selectorLabels" . | indent 20 }}
+                    app.kubernetes.io/component: app
+                topologyKey: kubernetes.io/hostname
+      {{- end }}
+      initContainers:
+        - name: pki-ensure
+          image: {{ include "nereidlink.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/nereidlink", "pki", "ensure",
+                    "--dir", "{{ .Values.persistence.mountPath }}/pki",
+                    "--hosts", "{{ join "," .Values.pki.serverHosts }}"]
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+        {{- if .Values.mqtt.tls.enabled }}
+        # Re-sign only the MQTT server leaf (never the CA) on every start so
+        # its SAN list tracks pki.serverHosts; previously issued device
+        # certificates stay valid.
+        - name: pki-server
+          image: {{ include "nereidlink.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/nereidlink", "pki", "server",
+                    "--dir", "{{ .Values.persistence.mountPath }}/pki",
+                    "--hosts", "{{ join "," .Values.pki.serverHosts }}"]
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+        {{- end }}
+        - name: migrate
+          image: {{ include "nereidlink.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/nereidlink", "migrate", "up",
+                    "-c", "/etc/nereidlink/config.d"]
+          volumeMounts:
+            # Directory mount keeps /etc/nereidlink/license visible and
+            # merges the ConfigMap base with the Secret overlay.
+            - name: config
+              mountPath: /etc/nereidlink/config.d
+              readOnly: true
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+      containers:
+        - name: nereidlink
+          image: {{ include "nereidlink.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve", "-c", "/etc/nereidlink/config.d"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.httpPort }}
+            - name: mqtt
+              containerPort: {{ .Values.service.mqttPort }}
+            {{- if .Values.mqtt.tls.enabled }}
+            - name: mqtts
+              containerPort: {{ .Values.mqtt.tlsPort }}
+            {{- end }}
+          env:
+            - name: NL_DATA_DIR
+              value: {{ .Values.persistence.mountPath | quote }}
+            {{- if .Values.cluster.enabled }}
+            # Per-pod identity for presence/topology and leader election; the
+            # value only feeds cluster-mode code paths (cluster_wiring.go).
+            - name: NL_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            failureThreshold: 6
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nereidlink/config.d
+              readOnly: true
+            {{- if .Values.license.existingSecret }}
+            # Externally supplied vendor public key overrides the baked
+            # trust anchor so it can be rotated without rebuilding the
+            # image. subPath keeps the image directory otherwise intact.
+            - name: license-key
+              mountPath: /etc/nereidlink/license/public.pem
+              subPath: {{ .Values.license.secretKey }}
+              readOnly: true
+            {{- end }}
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+            {{- if and .Values.oidc.enabled .Values.oidc.caBundleSecret }}
+            # Internal/private IdP CA: the app trusts this in addition to the
+            # baked public roots for OIDC discovery/JWKS/token exchange.
+            - name: oidc-ca
+              mountPath: /etc/nereidlink/oidc-ca
+              readOnly: true
+            {{- end }}
+            {{- if and .Values.sso.enabled .Values.sso.caBundleSecret }}
+            # Internal/private CA for the NS portal: trusted for the
+            # server-to-server ticket verify call.
+            - name: sso-ca
+              mountPath: /etc/nereidlink/sso-ca
+              readOnly: true
+            {{- end }}
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+      volumes:
+        # Projected directory: 10-base.yaml (ConfigMap, tunables) merged
+        # with 90-secret.yaml (Secret overlay) by the loader at startup.
+        - name: config
+          projected:
+            sources:
+              - configMap:
+                  name: {{ include "nereidlink.fullname" . }}-config
+              - secret:
+                  name: {{ include "nereidlink.fullname" . }}-config-secret
+        {{- if .Values.license.existingSecret }}
+        - name: license-key
+          secret:
+            secretName: {{ .Values.license.existingSecret }}
+        {{- end }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "nereidlink.fullname" . }}-data
+        {{- if and .Values.oidc.enabled .Values.oidc.caBundleSecret }}
+        - name: oidc-ca
+          secret:
+            secretName: {{ .Values.oidc.caBundleSecret }}
+            items:
+              - key: {{ .Values.oidc.caBundleKey }}
+                path: ca.crt
+        {{- end }}
+        {{- if and .Values.sso.enabled .Values.sso.caBundleSecret }}
+        - name: sso-ca
+          secret:
+            secretName: {{ .Values.sso.caBundleSecret }}
+            items:
+              - key: {{ .Values.sso.caBundleKey }}
+                path: ca.crt
+        {{- end }}
+      nodeSelector:
+{{ toYaml .Values.nodeSelector | indent 8 }}

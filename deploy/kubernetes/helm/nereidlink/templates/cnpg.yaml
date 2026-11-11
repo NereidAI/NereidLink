@@ -1,0 +1,65 @@
+{{- /*
+Copyright (C) 2026 YIQISOFT
+SPDX-License-Identifier: Apache-2.0
+
+CloudNativePG-managed PostgreSQL with TimescaleDB (postgresql.mode=cnpg).
+Requires the cnpg operator installed cluster-wide. The Cluster creates
+-rw/-ro/-r Services; the app DSN points at the -rw Service which always
+follows the elected primary. The TimescaleDB extension is created in every
+new database via postInitTemplateSQL (runs as superuser), so app migrations
+never need superuser rights.
+*/ -}}
+{{- if eq .Values.postgresql.mode "cnpg" }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "nereidlink.fullname" . }}-pg-creds
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+    app.kubernetes.io/component: postgresql
+type: Opaque
+stringData:
+  username: {{ .Values.postgresql.username | quote }}
+  password: {{ .Values.postgresql.password | quote }}
+  database: {{ .Values.postgresql.database | quote }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "nereidlink.fullname" . }}-postgresql
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  description: NereidLink PostgreSQL with TimescaleDB
+  instances: {{ .Values.postgresql.cnpg.instances }}
+  imageName: {{ include "nereidlink.depImage" (dict "registry" .Values.postgresql.cnpg.image.registry "repository" .Values.postgresql.cnpg.image.repository "tag" .Values.postgresql.cnpg.image.tag) }}
+  imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 4 }}
+  primaryUpdateStrategy: unsupervised
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgresql.database | quote }}
+      owner: {{ .Values.postgresql.username | quote }}
+      secret:
+        name: {{ include "nereidlink.fullname" . }}-pg-creds
+      postInitTemplateSQL:
+        - "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+  storage:
+    storageClass: {{ .Values.postgresql.cnpg.storageClass }}
+    size: {{ .Values.postgresql.cnpg.size }}
+  # CNPG generates postgresql.conf itself (unlike the timescale image's
+  # stock entrypoint), so the extension library must be preloaded explicitly
+  # or CREATE EXTENSION timescaledb fails at first migration. The dedicated
+  # field is required: shared_preload_libraries is a fixed parameter and
+  # cannot be set through postgresql.parameters.
+  postgresql:
+    shared_preload_libraries:
+      - timescaledb
+  resources:
+{{ toYaml .Values.postgresql.cnpg.resources | indent 4 }}
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: preferred
+{{- end }}

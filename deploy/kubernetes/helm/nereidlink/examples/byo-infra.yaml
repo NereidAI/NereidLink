@@ -1,0 +1,61 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Example values for the "bring your own infrastructure" deployment: the
+# chart only installs the NereidLink process and points it at an existing
+# PostgreSQL (TimescaleDB), NATS (JetStream) and S3-compatible object store.
+#
+#   helm install nereidlink deploy/kubernetes/helm/nereidlink \
+#       -n nereidlink --create-namespace \
+#       -f deploy/kubernetes/helm/nereidlink/examples/byo-infra.yaml
+#
+# Put real credentials in a separate, non-committed -f file or use --set / a
+# secrets manager; the values here are placeholders.
+
+# --- Use your own PostgreSQL (must have the TimescaleDB extension) ----------
+postgresql:
+  mode: external
+  externalDSN: "postgres://nereidlink:CHANGE_ME@pg.example.com:5432/nereidlink?sslmode=require"
+
+# --- Use your own NATS (JetStream must be enabled server-side) --------------
+nats:
+  enabled: false
+  externalURL: "nats://nats.example.com:4222"
+
+# --- Binary object storage (ADR-0006) ---------------------------------------
+# Object storage is mandatory on Kubernetes (pod disks are ephemeral; an
+# RWX volume is not an object store). Point at MinIO, SeaweedFS, AWS S3,
+# Ceph RGW, etc. The bucket is created automatically at startup.
+blob:
+  endpoint: "s3.internal.example.com:443"
+  publicEndpoint: "s3.example.com"
+  region: "us-east-1"
+  bucket: "nereidlink"
+  accessKey: "CHANGE_ME"
+  secretKey: "CHANGE_ME"
+  presignTTL: "15m"
+  secure: true
+  # publicSecure selects the scheme embedded in presigned download URLs;
+  # it can differ from secure (internal endpoint) when the public route is
+  # TLS-terminated by an ingress and the in-cluster endpoint stays plain HTTP.
+  publicSecure: true
+  # Optional: let the chart publish the object store's public route
+  # (Traefik IngressRoute + cert-manager certificate in the store's
+  # namespace + CORS for in-browser text/media previews). Leave disabled
+  # when your infra already owns the route.
+  # publicIngress:
+  #   enabled: true
+  #   corsOrigin: "https://nereidlink.example.com"
+  maxUploadBytes: 536870912
+
+auth:
+  jwtSecret: "CHANGE_ME_32+_char_random_string"
+
+ingress:
+  host: nereidlink.example.com
+  tls:
+    secretName: nereidlink-tls
+
+# NOTE: OIDC (ADR-0021) is enabled in the same opt-in style via the oidc
+# block; see examples/oidc.yaml. OpenTelemetry (ADR-0025) OTLP export remains
+# unimplemented.

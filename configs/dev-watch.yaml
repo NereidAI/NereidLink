@@ -1,0 +1,61 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+server:
+  http_listen: ":8081"
+  ws_path: "/ws"
+  ws_read_limit: 65536
+  ws_ping_interval: "30s"
+  shutdown_timeout: "30s"
+
+registry:
+  listen: "127.0.0.1:19091"
+
+presence:
+  ingress_id: "ingress-watcher"
+  heartbeat_interval: "15s"
+  lease_ttl: "45s"
+  offline_batch_size: 1000
+  offline_batch_interval: "100ms"
+  persist_buffer_size: 4096
+
+nats:
+  url: "nats://127.0.0.1:4222"
+
+postgres:
+  dsn: "postgres://nereidlink:nereidlink@127.0.0.1:5432/nereidlink?sslmode=disable"
+
+ingest_mqtt:
+  listen: ":1884"
+
+telemetry:
+  flush_interval: "500ms"
+  flush_size: 1000
+  max_ack_pending: 10000
+  dedup_window: 100000
+
+command:
+  default_timeout: "30s"
+  persistent_ttl: "24h"
+  delivery_timeout: "5s"
+  sweep_interval: "5s"
+  claim_batch_size: 100
+  max_body_bytes: 65536
+
+notify:
+  frequency_window: "5m"
+  smtp:
+    enabled: false
+  critical_workers: 4
+  workers: 4
+  delivery_timeout: "5s"
+
+rules:
+  max_ack_pending: 10000
+  reload_interval: "3s"
+  script_timeout: "1s"
+
+seed:
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  device_id: "00000000-0000-0000-0000-000000000100"
+  device_token: "seed-device-token"

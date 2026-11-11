@@ -1,0 +1,13 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+.tmp/
+.git/
+bin/
+web/node_modules/
+# Built assets never enter the build context (each image builds what it
+# needs), but the tracked placeholder must survive: the backend image no
+# longer runs the web build, and web/assets.go's `//go:embed all:dist`
+# fails at compile time when the directory is absent entirely.
+web/dist/*
+!web/dist/.gitkeep

@@ -1,0 +1,316 @@
+{{- /*
+Copyright (C) 2026 YIQISOFT
+SPDX-License-Identifier: Apache-2.0
+
+Render the non-sensitive part of the NereidLink configuration. Operators
+can inspect and tune these values (via Helm values or a post-render patch)
+without reading credentials. Secret keys live in config-secret.yaml and
+are deep-merged over this base at startup from /etc/nereidlink/config.d.
+*/ -}}
+{{- if not .Values.nats.enabled -}}
+{{- required "nats.externalURL is required when nats.enabled=false" .Values.nats.externalURL -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nereidlink.fullname" . }}-config
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+data:
+  10-base.yaml: |
+    server:
+      http_listen: "0.0.0.0:{{ .Values.service.httpPort }}"
+      ws_path: "{{ .Values.ingress.wsPath }}"
+      ws_read_limit: 65536
+      ws_ping_interval: "30s"
+      shutdown_timeout: "30s"
+
+    registry:
+      listen: "0.0.0.0:19090"
+      module_token: "dev-module-token"
+
+    presence:
+      ingress_id: "{{ .Values.presence.ingressId }}"
+      heartbeat_interval: "15s"
+      lease_ttl: "45s"
+      offline_batch_size: 1000
+      offline_batch_interval: "100ms"
+      persist_buffer_size: 4096
+
+    manifest:
+      lease_ttl: "16m"
+      sweep_interval: "1m"
+
+    link_health:
+      heartbeat_interval: "30s"
+      suspect_after: "45s"
+      down_after: "90s"
+      sweep_interval: "10s"
+      flap_window: "10m"
+      flap_threshold: 5
+
+    link_notify:
+      escalation_after: "30m"
+      escalation_sweep_interval: "1m"
+      digest_enabled: true
+      digest_hour_utc: 8
+      digest_sweep_interval: "1m"
+
+    connector:
+      pending_after: "5m"
+      failed_escalation_after: "1h"
+      sweep_interval: "1m"
+
+    auto_provision:
+      enabled: false
+      max_per_cycle: 100
+      max_candidates: 1000
+      default_profile: ""
+
+    probe:
+      max_devices: 100
+      create_rate: "1s"
+      max_concurrent: 5
+      cooldown: "10s"
+      default_timeout: "10s"
+      task_deadline: "60s"
+      retention: "24h"
+      sweep_interval: "1m"
+    blob:
+      provider: "s3"
+      endpoint: {{ required "blob.endpoint is required: Kubernetes uses an S3-compatible object store (set an in-cluster host:port)" .Values.blob.endpoint | quote }}
+{{- if .Values.blob.publicEndpoint }}
+      public_endpoint: {{ .Values.blob.publicEndpoint | quote }}
+{{- end }}
+      region: {{ .Values.blob.region | quote }}
+      bucket: {{ .Values.blob.bucket | quote }}
+      presign_ttl: {{ .Values.blob.presignTTL | quote }}
+      secure: {{ .Values.blob.secure }}
+      public_secure: {{ .Values.blob.publicSecure }}
+      max_upload_bytes: {{ .Values.blob.maxUploadBytes }}
+      # Device media policy (distinct from firmware max_upload_bytes).
+      media_max_bytes: {{ .Values.blob.mediaMaxBytes }}
+      media_allowed_types:
+{{- range .Values.blob.mediaAllowedTypes }}
+        - {{ . | quote }}
+{{- end }}
+
+    nats:
+      url: "{{ include "nereidlink.natsURL" . }}"
+      jetstream_replicas: {{ .Values.nats.jetstreamReplicas }}
+
+    cluster:
+      enabled: {{ .Values.cluster.enabled }}
+      lease_ttl: "{{ .Values.cluster.leaseTTL }}"
+
+    bus:
+      compression:
+        level: "balanced"
+        min_bytes: 0
+
+    ingest_limit:
+      per_device_rate: 100
+      per_device_burst: 100
+      sweep_interval: "1m"
+      idle: "10m"
+      # ADR-0014 flood alarm; 0 disables.
+      flood_threshold: 0
+      flood_window: "10s"
+      flood_recover: "2m"
+
+    # ADR-0014 online-but-silent detection; off unless enabled.
+    silence_detection:
+      enabled: false
+      sweep_interval: "60s"
+
+    retention:
+      sweep_interval: "24h"
+
+    # Plain MQTT is exposed in-cluster and via the NodePort service. MQTTS
+    # (8883) is terminated by NereidLink itself with the server certificate on
+    # the persistent PKI volume; the leaf is re-signed on each start so its
+    # SANs track pki.serverHosts without rotating the device CA.
+    ingest_mqtt:
+      listen: "0.0.0.0:{{ .Values.service.mqttPort }}"
+{{- if .Values.mqtt.tls.enabled }}
+      tls_listen: "0.0.0.0:{{ .Values.mqtt.tlsPort }}"
+{{- else }}
+      tls_listen: ""
+{{- end }}
+      tls_cert_file: "{{ .Values.persistence.mountPath }}/pki/server.pem"
+      tls_key_file: "{{ .Values.persistence.mountPath }}/pki/server-key.pem"
+      tls_client_ca_file: "{{ .Values.persistence.mountPath }}/pki/ca.pem"
+      tls_require_client_cert: {{ .Values.mqtt.tls.requireClientCert }}
+
+    ingest_http:
+      ingress_id: "{{ .Values.presence.ingressId }}-http"
+      long_poll_wait: "25s"
+      session_ttl: "90s"
+      sweep_interval: "15s"
+      mailbox_size: 16
+      max_telemetry_bytes: 65536
+
+    telemetry:
+      flush_interval: "500ms"
+      flush_size: 1000
+      max_ack_pending: 10000
+      dedup_window: 100000
+
+    command:
+      default_timeout: "30s"
+      persistent_ttl: "24h"
+      delivery_timeout: "5s"
+      sweep_interval: "5s"
+      claim_batch_size: 100
+      max_body_bytes: 65536
+      max_batch_targets: 1000
+
+    notify:
+      frequency_window: "5m"
+      smtp:
+        enabled: false
+      critical_workers: 4
+      workers: 4
+      delivery_timeout: "5s"
+
+    deadman:
+      enabled: false
+      smtp:
+        enabled: false
+      email_recipients: []
+      interval: "15s"
+      threshold: 3
+      timeout: "5s"
+
+    accounting:
+      enabled: true
+      node_id: "{{ .Values.accounting.nodeId }}"
+      sample_rate: 10
+      capacity: 256
+      report_interval: "30s"
+      top_n: 20
+
+    rules:
+      max_ack_pending: 10000
+      reload_interval: "3s"
+      script_timeout: "1s"
+
+    seed:
+      tenant_id: "00000000-0000-0000-0000-000000000001"
+      device_id: "00000000-0000-0000-0000-000000000100"
+      device_token: "seed-device-token"
+
+    module:
+      heartbeat_lease: "30s"
+      sweep_interval: "10s"
+
+    provision:
+      poll_interval: "5s"
+      lease: "2m"
+      max_attempts: 10
+      min_backoff: "2s"
+      max_backoff: "5m"
+
+    identity:
+      access_ttl: "30m"
+      refresh_ttl: "168h"
+
+{{- if .Values.oidc.enabled }}
+    # External OIDC SSO (ADR-0021). Discovery runs at startup.
+    oidc:
+      enabled: true
+      issuer: {{ required "oidc.issuer is required when oidc.enabled" .Values.oidc.issuer | quote }}
+      client_id: {{ required "oidc.clientID is required when oidc.enabled" .Values.oidc.clientID | quote }}
+      redirect_url: {{ default (printf "%s/v1/auth/oidc/callback" (include "nereidlink.baseURL" .)) .Values.oidc.redirectURL | quote }}
+      frontend_base_url: {{ default (include "nereidlink.baseURL" .) .Values.oidc.frontendBaseURL | quote }}
+{{- if .Values.oidc.scopes }}
+      scopes:
+{{- range .Values.oidc.scopes }}
+        - {{ . | quote }}
+{{- end }}
+{{- end }}
+      tenant_id: {{ required "oidc.tenantID is required when oidc.enabled" .Values.oidc.tenantID | quote }}
+      default_role: {{ .Values.oidc.defaultRole | quote }}
+      groups_claim: {{ .Values.oidc.groupsClaim | quote }}
+      group_role:
+{{- if .Values.oidc.groupRole }}
+{{ toYaml .Values.oidc.groupRole | indent 8 }}
+{{- else }}
+        {}
+{{- end }}
+      state_ttl: "{{ .Values.oidc.stateTTL }}"
+{{- if .Values.cluster.enabled }}
+      state_store: "nats"
+{{- end }}
+{{- if .Values.oidc.caBundleSecret }}
+      ca_file: "/etc/nereidlink/oidc-ca/ca.crt"
+{{- end }}
+{{- else }}
+    oidc:
+      enabled: false
+{{- end }}
+
+{{- if .Values.sso.enabled }}
+    # NereidSphere one-time handoff ticket SSO (ADR-0021 alternative).
+    sso:
+      enabled: true
+      ns_base_url: {{ required "sso.nsBaseURL is required when sso.enabled" .Values.sso.nsBaseURL | quote }}
+      client_id: {{ required "sso.clientID is required when sso.enabled" .Values.sso.clientID | quote }}
+      callback_path: {{ .Values.sso.callbackPath | quote }}
+      frontend_base_url: {{ default (include "nereidlink.baseURL" .) .Values.sso.frontendBaseURL | quote }}
+      tenant_id: {{ required "sso.tenantID is required when sso.enabled" .Values.sso.tenantID | quote }}
+      default_role: {{ .Values.sso.defaultRole | quote }}
+      role_map:
+{{- if .Values.sso.roleMap }}
+{{ toYaml .Values.sso.roleMap | indent 8 }}
+{{- else }}
+        {}
+{{- end }}
+      group_role:
+{{- if .Values.sso.groupRole }}
+{{ toYaml .Values.sso.groupRole | indent 8 }}
+{{- else }}
+        {}
+{{- end }}
+      reconcile_memberships: {{ .Values.sso.reconcileMemberships }}
+{{- if .Values.sso.caBundleSecret }}
+      ca_file: "/etc/nereidlink/sso-ca/ca.crt"
+{{- end }}
+{{- else }}
+    sso:
+      enabled: false
+{{- end }}
+
+    license:
+      public_key_path: "/etc/nereidlink/license/public.pem"
+      grace_period: "168h"
+      clock_file: "{{ .Values.persistence.mountPath }}/license-clock"
+
+    ops_admin:
+      listen: "127.0.0.1:19190"
+      shutdown_timeout: "10s"
+
+    credential_cache:
+      enabled: {{ .Values.credentialCache.enabled }}
+      positive_ttl: "{{ .Values.credentialCache.positiveTTL }}"
+      negative_ttl: "{{ .Values.credentialCache.negativeTTL }}"
+      max_cost: {{ .Values.credentialCache.maxCost }}
+      num_counters: {{ .Values.credentialCache.numCounters }}
+      l2:
+        disabled: {{ .Values.credentialCache.l2.disabled }}
+        bucket: "{{ .Values.credentialCache.l2.bucket }}"
+{{- if .Values.horizon.enabled }}
+    horizon:
+      enabled: true
+      base_url: {{ required "horizon.baseURL is required when horizon.enabled" .Values.horizon.baseURL | quote }}
+      org: {{ required "horizon.org is required when horizon.enabled" .Values.horizon.org | quote }}
+      default_precision: {{ .Values.horizon.defaultPrecision | quote }}
+      gateway_destinations:
+      {{- range $gateway, $destination := .Values.horizon.gatewayDestinations }}
+        {{ $gateway | quote }}: {{ $destination | quote }}
+      {{- end }}
+      {{- if .Values.horizon.caFile }}
+      ca_file: {{ .Values.horizon.caFile | quote }}
+      {{- end }}
+      insecure_skip_verify: {{ .Values.horizon.insecureSkipVerify }}
+{{- end }}

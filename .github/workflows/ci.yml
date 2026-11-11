@@ -1,0 +1,179 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Continuous integration gate (ADR-0031, CI stage).
+#
+# This file runs on every push to main and every pull request with no
+# secrets, enforcing the same local checks contributors run before a task is
+# considered done. Two independent jobs keep backend and frontend feedback
+# parallel.
+#
+# Scope is deliberate: the later ADR-0031 stages (multi-arch image, the
+# testcontainers component suite, SBOM via syft, grype CVE scan, cosign
+# signing) are release-time work gated on tags and need registry/key material.
+# Putting them in a per-commit pipeline would either fail for lack of secrets
+# or force secrets into every fork. They belong in a separate tag-triggered
+# release workflow, not here.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: this workflow only reads the repository contents.
+permissions:
+  contents: read
+
+# Cancel an older run for the same ref when a new commit lands, so force-pushes
+# do not waste runner minutes on a result that will be superseded.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # backend runs the Go gates. Database-backed tests are skipped here because
+  # NL_TEST_DATABASE_URL is unset; they remain opt-in per the test harness.
+  backend:
+    name: Backend lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # Read the version from go.mod so the toolchain moves with the repo
+          # instead of being duplicated here.
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l cmd internal)"
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt-clean:"
+            echo "$unformatted"
+            echo "Run 'gofmt -w cmd internal' and commit the result."
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        # v7 is the first action release supporting golangci-lint v2;
+        # v6 rejects the v2.15.0 version string outright.
+        uses: golangci/golangci-lint-action@v7
+        with:
+          # Pinned to the version used locally; .golangci.yml declares v2
+          # config syntax, so a v1 linter would reject it. v2.15 is the first
+          # release with Go 1.27 module support.
+          version: v2.15.0
+          args: --timeout=5m
+
+      - name: Run unit tests
+        run: go test ./...
+
+      - name: Compile all packages
+        # web/dist/.gitkeep keeps the embedded asset path valid in a checkout
+        # with no built frontend, so this compiles without the web build.
+        run: go build ./...
+
+  # frontend runs the Node gates: dependency install is reproducible via the
+  # lockfile, then lint, typecheck and the production build.
+  frontend:
+    name: Frontend lint, typecheck & build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        # npm ci installs exactly what the lockfile records and fails if it is
+        # out of sync with package.json, which keeps CI reproducible.
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Type check
+        # Vite's build does not type check, so this is run explicitly.
+        run: npx tsc --noEmit
+
+      - name: Production build
+        run: npm run build
+
+  # image builds both release architectures of each split image into the
+  # GitHub Actions buildx cache. Nothing is loaded or pushed (treaty
+  # §19.1); the tag-triggered release workflow reuses these layers.
+  # build-push-action is required because the gha cache backend relies on the
+  # Actions runtime integration. Each image MUST use its own explicit, stable
+  # gha scope (L-153): a gha export writes a new versioned cache index that
+  # contains only its own solve's layer chains, so two builds sharing the bare
+  # type=gha scope overwrite each other's indexes and the second export makes
+  # the first image's chains undiscoverable. The scope strings MUST match the
+  # cache-scope inputs of the release.yml callers byte-for-byte.
+  image:
+    name: Warm multi-arch image build cache
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Warm backend image cache (no push, no load)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/images/backend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          # Same dev-channel build argument as publish-dev.yml, so the cache
+          # keys line up; release runs inject bare SemVer via the tag workflow.
+          build-args: |
+            VERSION=0.0.0-dev
+          cache-from: type=gha,scope=nereidlink-backend
+          cache-to: type=gha,mode=max,scope=nereidlink-backend
+          provenance: false
+          sbom: false
+
+      - name: Warm frontend image cache (no push, no load)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/images/frontend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          # Same dev-channel build argument as publish-dev.yml, so the cache
+          # keys line up; release runs inject bare SemVer via the tag workflow.
+          build-args: |
+            VERSION=0.0.0-dev
+          cache-from: type=gha,scope=nereidlink-frontend
+          cache-to: type=gha,mode=max,scope=nereidlink-frontend
+          provenance: false
+          sbom: false

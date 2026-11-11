@@ -1,0 +1,206 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Single-host NereidLink stack with the split frontend/backend topology.
+#
+# Default topology (a host nginx already occupies public 80/443, as on the
+# test server):
+#
+#   host nginx :80/:443 (certbot-managed TLS)
+#     /v1 /ws /api /metrics /healthz /auth --> 127.0.0.1:18080 --> nereidlink:8080
+#     / (browser, SPA)                       --> 127.0.0.1:18081 --> frontend:80
+#   Devices  :11883 --> nereidlink:1883  (plain MQTT)
+#   Devices  :18833 --> nereidlink:8883  (MQTTS, platform device CA)
+#
+# Standalone topology (no host nginx): run the bundled nginx-certbot edge
+# service explicitly via the "standalone-edge" profile, then it publishes
+# 10080/10443 and requests Let's Encrypt certificates itself:
+#
+#   docker compose --profile standalone-edge up -d
+#
+# The application image is distroless and ships no shell, so the startup
+# sequence mirrors the Helm chart's init containers: three one-shot services
+# (pki-ensure -> pki-server -> migrate) gate the long-running serve container
+# via service_completed_successfully conditions.
+#
+# The app image runs as uid/gid 65532 (nonroot). Docker named volumes are
+# created root-owned and Compose has no equivalent of Kubernetes fsGroup, so
+# the application-based services here override the user to root. The state
+# volume is therefore consistently root-owned; change this only if you replace
+# the named volume with a host directory pre-chowned to 65532.
+#
+# The application, PostgreSQL (TimescaleDB), NATS and nginx-certbot images
+# use public canonical coordinates (treaty §18). Air-gapped hosts resolve
+# them through the node-level containerd registry mirror; keep the canonical
+# .env.example unchanged and use --env-file or COMPOSE_ENV_FILES to load the
+# actual environment from the central deploy-values directory.
+
+name: nereidlink
+
+services:
+  # TimescaleDB-enabled PostgreSQL. A plain postgres image fails migration
+  # 0001 which runs CREATE EXTENSION timescaledb. The port is not published
+  # to the host; only services on this network reach the database.
+  postgres:
+    image: timescale/timescaledb:2.17.2-pg16
+    environment:
+      POSTGRES_USER: nereidlink
+      POSTGRES_PASSWORD: nereidlink
+      POSTGRES_DB: nereidlink
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nereidlink -d nereidlink"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # NATS with JetStream enabled; -sd points JetStream state at the
+  # persistent directory so streams and consumer positions survive restarts.
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js", "-sd=/data", "-m", "8222"]
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Step 1: create the device CA and the persistent PKI/KEK directory.
+  # Idempotent; an existing CA is never overwritten.
+  pki-ensure:
+    image: ghcr.io/nereidai/nereidlink-backend:${NL_VERSION:-0.0.0-dev}
+    user: "0:0"
+    entrypoint: ["/usr/local/bin/nereidlink"]
+    command:
+      - pki
+      - ensure
+      - --dir
+      - /var/lib/nereidlink/pki
+      - --hosts
+      - localhost,127.0.0.1,nereidlink,nereidlink.example.com
+    volumes:
+      - nldata:/var/lib/nereidlink
+    restart: "no"
+
+  # Step 2: re-sign only the MQTT server leaf (never the CA) so its SAN list
+  # tracks the hosts above. Previously issued device certificates stay valid.
+  pki-server:
+    image: ghcr.io/nereidai/nereidlink-backend:${NL_VERSION:-0.0.0-dev}
+    user: "0:0"
+    entrypoint: ["/usr/local/bin/nereidlink"]
+    command:
+      - pki
+      - server
+      - --dir
+      - /var/lib/nereidlink/pki
+      - --hosts
+      - localhost,127.0.0.1,nereidlink,nereidlink.example.com
+    volumes:
+      - nldata:/var/lib/nereidlink
+    depends_on:
+      pki-ensure:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # Step 3: apply the embedded schema migrations explicitly. The service is
+  # retried by recreating it until PostgreSQL reports healthy.
+  migrate:
+    image: ghcr.io/nereidai/nereidlink-backend:${NL_VERSION:-0.0.0-dev}
+    user: "0:0"
+    entrypoint: ["/usr/local/bin/nereidlink"]
+    command: ["migrate", "up", "-c", "/etc/nereidlink/config.yaml"]
+    volumes:
+      - ./config.yaml:/etc/nereidlink/config.yaml:ro
+      - nldata:/var/lib/nereidlink
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      pki-server:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # The all-in-one platform process: HTTP/WS API on 8080, plain MQTT on 1883
+  # and MQTTS on 8883 (TLS terminated by NereidLink itself with the leaf from
+  # the PKI volume; this is NOT the Let's Encrypt certificate).
+  nereidlink:
+    image: ghcr.io/nereidai/nereidlink-backend:${NL_VERSION:-0.0.0-dev}
+    user: "0:0"
+    entrypoint: ["/usr/local/bin/nereidlink"]
+    command: ["serve", "-c", "/etc/nereidlink/config.yaml"]
+    ports:
+      - "127.0.0.1:18080:8080"
+      - "11883:1883"
+      - "18833:8883"
+    volumes:
+      - ./config.yaml:/etc/nereidlink/config.yaml:ro
+      # Some v0.0.1 images were built with build/Dockerfile, which does not
+      # COPY the license public key. Mount the vendor public key from the
+      # repository so serve can verify licenses without rebuilding the image.
+      # If this compose directory is copied without the rest of the repo,
+      # place the key at ./license/public.pem on the host instead.
+      - ../../configs/license/public.pem:/etc/nereidlink/license/public.pem:ro
+      - nldata:/var/lib/nereidlink
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Stateless frontend: nginx serving the built Vite console. The edge
+  # (host nginx or the standalone service below) splits paths; this nginx
+  # never proxies to the backend. Loopback-only publish mirrors the backend
+  # so the host nginx is the only public entry in Mode A.
+  frontend:
+    image: ghcr.io/nereidai/nereidlink-frontend:${NL_VERSION:-0.0.0-dev}
+    ports:
+      - "127.0.0.1:18081:80"
+    depends_on:
+      nereidlink:
+        condition: service_started
+    restart: unless-stopped
+
+  # Standalone public HTTP/HTTPS edge. Only started with the
+  # "standalone-edge" profile; the default deployment relies on the host
+  # nginx instead. The image's entrypoint requests Let's Encrypt certificates
+  # over HTTP-01 for the server_name declared in nginx/nereidlink.conf, places
+  # temporary self-signed placeholders so nginx can boot, and re-checks
+  # renewal on RENEWAL_INTERVAL, reloading nginx.
+  #
+  # Let's Encrypt always validates against public port 80: make sure the
+  # public IP forwards :80 to this host's :10080 (and :443 to :10443).
+  nginx:
+    profiles: ["standalone-edge"]
+    image: jonasal/nginx-certbot:5.6.0-alpine
+    ports:
+      - "10080:80"
+      - "10443:443"
+    environment:
+      CERTBOT_EMAIL: ${CERTBOT_EMAIL:-}
+      STAGING: ${STAGING:-0}
+      RENEWAL_INTERVAL: 12h
+    volumes:
+      - ./nginx:/etc/nginx/user_conf.d:ro
+      - letsencrypt:/etc/letsencrypt
+    depends_on:
+      nereidlink:
+        condition: service_started
+      frontend:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  # PostgreSQL data; never delete in-place or the database is lost.
+  pgdata:
+  # NATS JetStream stream/consumer state.
+  nats-data:
+  # Device PKI material, tenant-secret KEK and license clock. MUST survive
+  # restarts or previously sealed secrets become undecryptable.
+  nldata:
+  # Let's Encrypt account, certificates and renewal metadata.
+  letsencrypt:

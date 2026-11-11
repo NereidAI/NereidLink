@@ -1,0 +1,171 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Reference business template pack (single-template document).
+# Import through POST /v1/tenants/{tenant}/business-templates/import
+# or `nereidlink templates import -f <file>`. The running NL binary
+# ships no business vocabulary of its own.
+
+schema_version: nereidlink.business-template/v1
+id: face-access-control
+version: 0.0.1
+name: Face access control
+description: Development business assembly for access conclusions and actions
+requires:
+    companion: face-service
+    model_detector: face-detector
+    model_embedding: face-embedding
+parameters:
+    additionalProperties: false
+    properties:
+        debounce_seconds:
+            default: 3
+            minimum: 0
+            type: integer
+        threshold:
+            default: 0.72
+            maximum: 1
+            minimum: 0
+            type: number
+        unknown_after_seconds:
+            default: 10
+            minimum: 1
+            type: integer
+        unknown_alarm:
+            default: true
+            type: boolean
+        working_end:
+            default: "18:00"
+            pattern: ^(?:[01][0-9]|2[0-3]):[0-5][0-9]$
+            type: string
+        working_start:
+            default: "08:00"
+            pattern: ^(?:[01][0-9]|2[0-3]):[0-5][0-9]$
+            type: string
+    type: object
+assembly:
+    nodes:
+        - id: camera
+          kind: camera
+          name: Camera
+          ref: camera
+          asset: {}
+          position:
+            x: 0
+            "y": 160
+        - id: pipeline
+          kind: pipeline
+          name: Face recognition
+          ref: face-recognition-v1
+          asset: {}
+          position:
+            x: 240
+            "y": 160
+        - id: model
+          kind: model
+          name: Face detector
+          ref: face-detector
+          asset: {}
+          position:
+            x: 160
+            "y": 0
+        - id: model-embedding
+          kind: model
+          name: Face embedding
+          ref: face-embedding
+          asset: {}
+          position:
+            x: 320
+            "y": 0
+        - id: companion
+          kind: companion
+          name: Face service
+          ref: face-service
+          asset: {}
+          position:
+            x: 480
+            "y": 160
+        - id: rule
+          kind: rule
+          name: Access decisions
+          ref: face-access-rules
+          asset: {}
+          position:
+            x: 720
+            "y": 160
+        # The following action node is reference demo data. It is optional;
+        # physical command execution is owned by the external receiving system.
+        - id: action-door
+          kind: action
+          name: Open door
+          ref: door-command
+          asset:
+            action_type: send-command
+            command_name: OpenDoor
+            resource: OpenDoor
+          position:
+            x: 960
+            "y": 80
+        - id: action-unknown-alarm
+          kind: action
+          name: Unknown person alarm
+          ref: unknown-person-alarm
+          asset:
+            action_type: create-alarm
+            alarm_type: BUSINESS_UNKNOWN_PERSON
+            severity: MAJOR
+          position:
+            x: 960
+            "y": 240
+        - id: northbound
+          kind: northbound
+          name: Access conclusions
+          ref: face-access-egress
+          asset:
+            channel: face-access.v1
+            edgex_device_name: face-access-control-edgex-conclusions
+            edgex_profile_name: face-access-control-conclusion-profile
+            edgex_resource_names:
+                - matched
+                - personId
+                - score
+            readings:
+                - matched
+                - personId
+                - score
+          position:
+            x: 960
+            "y": 400
+    edges:
+        - id: camera-pipeline
+          source: camera
+          target: pipeline
+          relation: frames
+        - id: companion-rule
+          source: companion
+          target: rule
+          relation: conclusions
+        - id: model-pipeline
+          source: model
+          target: pipeline
+          relation: uses
+        - id: embedding-pipeline
+          source: model-embedding
+          target: pipeline
+          relation: uses
+        - id: pipeline-companion
+          source: pipeline
+          target: companion
+          relation: facts
+        - id: rule-door
+          source: rule
+          target: action-door
+          relation: triggers
+        - id: rule-northbound
+          source: rule
+          target: northbound
+          relation: publishes
+        - id: rule-unknown-alarm
+          source: rule
+          target: action-unknown-alarm
+          relation: triggers

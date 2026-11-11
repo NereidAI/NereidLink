@@ -1,0 +1,34 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Example configuration for the SNMP southbound module. Unlike device-
+# initiated protocols, this module polls devices as a manager and receives
+# traps; copy to snmp.yaml and fill the enrollment token.
+
+# Core platform endpoints.
+core:
+  nats_url: "nats://core:4222"
+  registry_grpc: "core:19090"
+  registry_token: "dev-module-token"
+  management_url: "http://core:8080"
+
+# Enrollment of this module.
+module:
+  enrollment_token: "<token-from-provisioning>"
+  heartbeat_interval: "10s"
+
+# SNMP manager settings.
+snmp:
+  # Default protocol version when a device does not declare one.
+  version: "2c"
+  # Community for v1/v2c devices.
+  community: "public"
+  # UDP address of the trap receiver.
+  trap_listen: ":162"
+  # Poll timeout and retry count per device.
+  timeout: "5s"
+  retries: 2
+  # Poll groups: every device attached to this module maps its OIDs onto
+  # telemetry keys. Schedule and OID lists can also be set per device in
+  # the module configuration on the management page.
+  poll_interval: "60s"

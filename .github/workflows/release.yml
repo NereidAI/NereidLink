@@ -1,0 +1,85 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Release pipeline (root treaty §19). A pushed v* tag is the only trigger;
+# the repository has no VERSION file, so the git tag is the single version
+# source. All build/publication mechanics live in the organization reusable
+# workflow — SemVer tag validation, bare VERSION derivation (v0.0.1 ->
+# 0.0.1), amd64+arm64 index, three-tag scheme (no latest) and GHCR login.
+# The reusable workflow injects bare VERSION itself, so no VERSION build-arg
+# appears in these callers. The split topology publishes two images per tag:
+# nereidlink-backend (Go process) and nereidlink-frontend (static nginx
+# console). The GitHub Release entry is created by a separate job with
+# job-level contents: write.
+#
+# Each caller passes a distinct gha cache-scope matching the ci.yml warm job:
+# without named scopes the two images' gha cache indexes overwrite each other
+# and the backend release build goes cold. Requires the cache-scope input
+# published by NereidAI/.github release-image.yml @v1.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prep:
+    name: Derive image build metadata
+    runs-on: ubuntu-latest
+    outputs:
+      build_date: ${{ steps.meta.outputs.build_date }}
+    steps:
+      - id: meta
+        run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+  release-backend:
+    name: Build and publish backend image
+    needs: prep
+    uses: NereidAI/.github/.github/workflows/release-image.yml@v1
+    with:
+      image-name: nereidlink-backend
+      file: deploy/images/backend/Dockerfile
+      # Must match the ci.yml backend warm step's gha scope exactly.
+      cache-scope: nereidlink-backend
+      build-args: |
+        GIT_SHA=${{ github.sha }}
+        BUILD_DATE=${{ needs.prep.outputs.build_date }}
+
+  release-frontend:
+    name: Build and publish frontend image
+    needs: prep
+    uses: NereidAI/.github/.github/workflows/release-image.yml@v1
+    with:
+      image-name: nereidlink-frontend
+      file: deploy/images/frontend/Dockerfile
+      # Must match the ci.yml frontend warm step's gha scope exactly (L-153).
+      cache-scope: nereidlink-frontend
+      build-args: |
+        GIT_SHA=${{ github.sha }}
+        BUILD_DATE=${{ needs.prep.outputs.build_date }}
+
+  github-release:
+    name: Create GitHub Release entry
+    needs: [release-backend, release-frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create release with generated notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "GitHub Release ${GITHUB_REF_NAME} already exists; leaving it unchanged"
+          else
+            gh release create "${GITHUB_REF_NAME}" --generate-notes
+          fi

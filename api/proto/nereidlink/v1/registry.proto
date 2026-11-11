@@ -1,0 +1,66 @@
+// Copyright (C) 2026 YIQISOFT
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package nereidlink.v1;
+
+option go_package = "github.com/nereidai/nereidlink/api/gen/nereidlink/v1;v1";
+
+message AuthenticateRequest {
+  string tenant_id = 1;
+  string credentials_id = 2;
+  string credentials_value = 3;
+  // certificate_fingerprint is the SHA-256 hex fingerprint of the leaf
+  // certificate presented at the mTLS layer; populated only for X509.
+  string certificate_fingerprint = 4;
+}
+
+message DeviceIdentity {
+  string tenant_id = 1;
+  string device_id = 2;
+  repeated string capabilities = 3;
+}
+
+message AuthenticateResponse {
+  bool ok = 1;
+  DeviceIdentity device = 2;
+  // record carries the verification material of the resolved credential.
+  // It is populated on success so ingress nodes can cache it and verify
+  // possession locally on subsequent connections; empty on failure.
+  CredentialRecord record = 3;
+}
+
+// CredentialRecord is the cacheable verification material of one device
+// credential. It never carries presented secrets; it holds the stored
+// material an ingress verifies against.
+message CredentialRecord {
+  // type is the credential mechanism: TOKEN, PASSWORD, JWT or X509.
+  string type = 1;
+  // credentials_value is the stored verification material (token, argon2
+  // PHC, JWT verification key, X509 certificate PEM).
+  string credentials_value = 2;
+  // extra carries mechanism-specific constraints (e.g. JWT claims).
+  bytes extra = 3;
+  // credential_epoch is the tenant epoch stamped on the record, used to
+  // fence cached entries after an emergency epoch bump.
+  int64 credential_epoch = 4;
+  // expires_at_unix is the credential expiry as epoch seconds; 0 means no
+  // expiry. It bounds the cache entry TTL.
+  int64 expires_at_unix = 5;
+}
+
+message AuthorizeRequest {
+  DeviceIdentity device = 1;
+  string topic = 2;
+  string action = 3;
+}
+
+message AuthorizeResponse {
+  bool allowed = 1;
+}
+
+service RegistryAuth {
+  rpc Authenticate(AuthenticateRequest) returns (AuthenticateResponse);
+  rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
+}

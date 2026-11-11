@@ -1,0 +1,444 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# NereidLink Helm values. The application image uses its canonical GHCR
+# coordinate; k3s may resolve it through a path-preserving Harbor mirror.
+# Bundled postgres/nats images retain their separate mirror coordinates.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Target namespace is normally set with `helm install -n nereidlink
+# --create-namespace`; it is also templated below.
+namespace: nereidlink
+
+# Backend image: the Go process (REST/WS API, MQTT ingress, migrations).
+# The static console ships separately as frontend.image.
+image:
+  registry: ghcr.io
+  repository: nereidai/nereidlink-backend
+  # tag defaults to Chart appVersion (0.0.0-dev on the branch; bare SemVer in
+  # a release-packaged chart) when left empty.
+  tag: ""
+  # Only the bare-version tag is referenced here (treaty §19.2); the
+  # timestamp and git-sha tags exist for traceability/rollback. Always pulls
+  # same-tag rebuilds so rollout follows the newest build of that version.
+  pullPolicy: Always
+
+# Static console tier (frontend/backend split). The frontend image is an
+# nginx container serving the built Vite assets; it holds no state and can
+# scale and schedule independently of the backend. The Ingress routes only
+# browser paths ("/") here; /v1, /ws, /api, /metrics, /healthz and /auth go
+# to the backend Service.
+frontend:
+  replicaCount: 2
+  image:
+    registry: ghcr.io
+    repository: nereidai/nereidlink-frontend
+    # tag defaults to Chart appVersion (same version as the backend) when
+    # left empty.
+    tag: ""
+    pullPolicy: Always
+  service:
+    # ClusterIP HTTP port; nginx inside the container listens on 80.
+    port: 80
+  # Stateless and architecture-neutral: no amd64 pin and no PVC.
+  nodeSelector: {}
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "32Mi"
+    limits:
+      cpu: "250m"
+      memory: "128Mi"
+
+imagePullSecrets:
+  - name: harbor-registry-secret
+
+# Credentials used to render the namespace-local image pull secret. Set
+# create=false when an identically named secret already exists in a shared
+# namespace (imagePullSecrets still references it by name). Empty by
+# default: public coordinates pull anonymously, and the template renders no
+# secret while username is empty (treaty §18; supply via an untracked -f file).
+registryCredentials:
+  create: true
+  registry: ""
+  username: ""
+  password: ""
+  email: ""
+
+# Number of all-in-one pods. The process embeds JetStream consumers and
+# in-memory caches; set >1 together with cluster.enabled=true, an NFS RWX
+# persistence volume, a clustered NATS (nats.replicas=3) and a multi-instance
+# Postgres (postgresql.mode=cnpg). docker compose and one-pod k3s keep 1.
+replicaCount: 1
+
+# cluster turns on multi-replica behavior: NATS-KV leader election for the
+# exclusive background roles, shared (NATS KV) OIDC login state and per-pod
+# presence identities injected through the downward API. Has no effect on the
+# single all-in-one process deployment.
+cluster:
+  enabled: false
+  leaseTTL: "15s"
+
+# Pod disruption budget for the all-in-one deployment (only rendered when
+# replicaCount > 1).
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Public HTTP/WS ingress hostname.
+ingress:
+  enabled: true
+  className: traefik
+  host: nereidlink.example.com
+  tls:
+    enabled: true
+    secretName: nereidlink-tls
+  wsPath: /ws
+
+service:
+  httpPort: 8080
+  mqttPort: 1883
+  type: ClusterIP
+
+# External MQTT access. HTTP/WS goes through the Ingress; raw MQTT is not an
+# HTTP protocol, so it is exposed through a dedicated NodePort service (TCP,
+# reachable on every node IP). TLS 8883 is terminated by NereidLink itself
+# using the PKI volume's server certificate, whose SANs come from
+# pki.serverHosts below. Set type to "ClusterIP" or enabled=false to keep
+# MQTT in-cluster only.
+mqtt:
+  enabled: true
+  type: NodePort
+  plainPort: 1883
+  tlsPort: 8883
+  nodePortPlain: 31883
+  nodePortTLS: 31884
+  tls:
+    # Enables the MQTTS listener (ingest_mqtt.tls_listen). Client
+    # certificates are optional unless requireClientCert is true.
+    enabled: true
+    requireClientCert: false
+
+# Node selector keeps the pod on amd64 nodes that can reach the S3 service.
+nodeSelector:
+  kubernetes.io/arch: amd64
+
+resources:
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
+    cpu: "1"
+    memory: "1Gi"
+
+# Persistent state for the all-in-one pod: device PKI material, the
+# tenant-secret KEK and (with the default local blob provider) uploaded
+# binaries. MUST survive restarts so sealed secrets and objects persist.
+persistence:
+  storageClass: nfs-csi
+  size: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  # Container path the volume is mounted at; config paths derive from it.
+  mountPath: /var/lib/nereidlink
+
+# Identity / API secrets. Override in production via -f or --set.
+auth:
+  jwtSecret: "change-me-jwt-secret-0123456789abcdef"
+  # The first administrator sets their own password at first login via the
+  # bootstrap screen (migration 0049 creates an empty-password admin); there
+  # is no default password to configure here.
+
+# License vendor trust anchor. The Ed25519 public key used to verify signed
+# license files is baked into the image by default. To rotate the trust
+# anchor without rebuilding, create a Secret holding the public PEM (e.g.
+# `kubectl create secret generic nereidlink-license-key --from-file=public.pem`)
+# and set existingSecret; the key is mounted read-only over the baked file.
+# Licenses themselves are always imported at runtime via
+# `nereidlink license install --file <signed.json>` and never baked in.
+license:
+  existingSecret: ""
+  secretKey: "public.pem"
+
+# External OIDC single sign-on (ADR-0021). Disabled by default; when enabled
+# the process performs OIDC discovery at startup and fails fast if the issuer
+# is unreachable/misconfigured. Users are JIT-provisioned (empty password)
+# into tenantID, with a role taken from groupRole[groupsClaim] or defaultRole.
+# clientSecret is rendered into the same namespaced config Secret as the DSN
+# and S3 credentials. redirectURL/frontendBaseURL default to the ingress host
+# when left empty. Register redirectURL verbatim at the IdP.
+oidc:
+  enabled: false
+  issuer: ""
+  clientID: ""
+  clientSecret: ""
+  # Defaults to "<ingress origin>/v1/auth/oidc/callback" when empty.
+  redirectURL: ""
+  # Defaults to the ingress origin (SPA /auth/callback) when empty.
+  frontendBaseURL: ""
+  # Empty uses openid/email/profile.
+  scopes: []
+  # Tenant JIT users and mapped roles are attached to. Defaults to the seed
+  # tenant created by the chart's bootstrap.
+  tenantID: "00000000-0000-0000-0000-000000000001"
+  # Role assigned when no IdP group maps. Allowed: TENANT_ADMIN, ENGINEER,
+  # CUSTOMER_USER, READ_ONLY. PLATFORM_ADMIN/SERVICE_ACCOUNT can never be
+  # assigned from an IdP group.
+  defaultRole: "READ_ONLY"
+  groupsClaim: "groups"
+  # IdP group name -> built-in role, e.g. {"/nereidlink/admins": "TENANT_ADMIN"}.
+  groupRole: {}
+  stateTTL: "10m"
+  # When the IdP uses an internal/private CA, name an existing Secret in this
+  # namespace carrying its PEM (e.g. a cert-manager CA secret's ca.crt). It is
+  # mounted read-only and trusted in addition to the baked public roots.
+  caBundleSecret: ""
+  caBundleKey: "ca.crt"
+
+
+# NereidSphere (NS) one-time handoff ticket SSO (ADR-0021 alternative).
+# Mutually exclusive with oidc.enabled. In this mode the suite portal (NS)
+# mints a 30-second single-use ticket after the user logs in, redirects the
+# browser to the product's callback endpoint with the ticket, and the
+# product exchanges it server-to-server at NS's /api/v1/auth/ticket/verify
+# using its shared secret. This avoids the product needing its own OIDC
+# client registration and keeps the identity plane entirely in NS.
+sso:
+  enabled: false
+  nsBaseURL: ""
+  # Must equal the product id in NS's products list (NS checks the ticket
+  # audience against it).
+  clientID: ""
+  ssoSecret: ""
+  # Must equal the product's sso_callback_path in NS; NS redirects the
+  # browser to {frontendBaseURL}{callbackPath}?ticket=...&to=....
+  callbackPath: "/auth/ns-callback"
+  frontendBaseURL: ""
+  tenantID: "00000000-0000-0000-0000-000000000001"
+  # Role assigned when no ticket role maps. Allowed: TENANT_ADMIN, ENGINEER,
+  # CUSTOMER_USER, READ_ONLY. PLATFORM_ADMIN/SERVICE_ACCOUNT can never be
+  # assigned from a ticket; platform admin linkage works by email match.
+  defaultRole: "READ_ONLY"
+  # NS ticket identity role (Keycloak realm role) -> built-in role; used
+  # only on the no-groups fallback path.
+  roleMap: {}
+  # Last path segment of a /nereidlink/{tenant}/{role} NI group -> built-in
+  # role. The tenant is the UUID middle segment; every matching group
+  # materialises as a membership on login.
+  groupRole:
+    admins: TENANT_ADMIN
+    engineers: ENGINEER
+    read_only: READ_ONLY
+  # Revoke suite-managed memberships/roles removed from the group set on
+  # each group-based SSO login (CUSTOMER_USER memberships and platform
+  # admins are never touched).
+  reconcileMemberships: true
+  # When NS presents an internal/private CA, name an existing Secret in
+  # this namespace carrying its PEM. Mounted read-only and trusted in
+  # addition to the baked public roots for the /api/v1/auth/ticket/verify
+  # server-to-server call.
+  caBundleSecret: ""
+  caBundleKey: "ca.crt"
+#   bundled  - one StatefulSet pod (single-node, local-path block storage)
+#   cnpg     - a CloudNativePG Cluster managed by the operator already
+#              installed in the cluster (automatic failover, >=2 instances)
+#   external - no Postgres is installed; provide postgresql.externalDSN
+# The bundled image and the CNPG cluster both use the TimescaleDB-enabled
+# Postgres image (migration 0001 requires the extension).
+postgresql:
+  mode: bundled
+  externalDSN: ""
+  image:
+    # Public upstream TimescaleDB image (treaty §18); air-gapped nodes
+    # resolve it through the containerd registry mirror. The image bundles
+    # the TimescaleDB extension required by migration 0001; a plain postgres
+    # image fails CREATE EXTENSION.
+    registry: docker.io
+    repository: timescale/timescaledb
+    tag: "2.17.2-pg16"
+    pullPolicy: IfNotPresent
+  database: nereidlink
+  username: nereidlink
+  password: nereidlink
+  # PostgreSQL requires PGDATA mode 0700, which NFS root-squash forbids; use
+  # node-local block storage for the single replica.
+  storageClass: local-path
+  size: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+  # CNPG-managed cluster (postgresql.mode=cnpg). The CloudNativePG operator
+  # must already be installed in the cluster. Each instance gets its own
+  # node-local PVC; postInitTemplateSQL creates TimescaleDB as a superuser
+  # before the app migrations run.
+  cnpg:
+    instances: 3
+    storageClass: local-path
+    size: 20Gi
+    # CNPG-compatible image: Debian postgres uid 26 (NOT the Alpine
+    # timescale image used by the bundled StatefulSet, whose uid/entrypoint
+    # CNPG cannot use), with the vendor community (TSL) build installed -
+    # PGDG's Apache build rejects compression/continuous aggregates.
+    image:
+      # Self-built CNPG-compatible TimescaleDB image (deploy/images/postgres/
+      # Dockerfile.cnpg) published under the suite's public GHCR namespace;
+      # the internal registry is reached via the node mirror (treaty §18).
+      registry: ghcr.io
+      repository: nereidai/postgresql
+      tag: "16.4-timescale-tsl"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "2"
+        memory: "2Gi"
+
+# Bundled NATS with JetStream enabled. Set enabled=false and provide
+# nats.externalURL to use your own NATS (must have JetStream available).
+nats:
+  enabled: true
+  # replicas=1 runs a standalone server (single-node topology, R1). replicas
+  # >=3 forms a clustered JetStream Raft group with one node-local PVC each;
+  # JetStream requires an odd count (3 or 5).
+  replicas: 1
+  # jetstreamReplicas is the R factor of every stream/KV the app creates.
+  # Must equal nats.replicas in a clustered deployment; 1 for standalone.
+  jetstreamReplicas: 1
+  externalURL: ""
+  image:
+    # Public upstream NATS image (treaty §18); internal resolution goes
+    # through the node-level containerd registry mirror.
+    registry: docker.io
+    repository: library/nats
+    tag: "2.10-alpine"
+    pullPolicy: IfNotPresent
+  # JetStream Raft data MUST live on node-local block storage (fsync/fcntl
+  # semantics; never NFS). Each clustered replica gets its own RWO PVC.
+  storageClass: local-path
+  size: 8Gi
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# Blob storage (ADR-0006). Kubernetes always uses an S3-compatible object
+# store (MinIO, SeaweedFS, AWS S3, Ceph RGW, ...): pod filesystems are
+# ephemeral and an RWX volume is not an object store (no presigned URLs,
+# no shared object lifecycle). The local-directory backend exists only for
+# docker-compose/dev in the binary and is intentionally not charted here.
+blob:
+  # In-cluster host[:port] used for put/list/delete (required).
+  endpoint: ""
+  # Host[:port] embedded in presigned download URLs; defaults to endpoint.
+  publicEndpoint: ""
+  region: "us-east-1"
+  bucket: "nereidlink"
+  accessKey: ""
+  secretKey: ""
+  # HTTPS for S3 calls; plain HTTP is normal for an in-cluster endpoint.
+  secure: false
+  # HTTPS for presigned download URLs (what browsers/devices reach via
+  # publicIngress). The in-cluster endpoint stays plain HTTP.
+  publicSecure: true
+  # Optional public ingress in front of the object store, so presigned
+  # URLs are reachable from browsers and edges outside the cluster. It is
+  # rendered in this release's namespace as an ExternalName service
+  # pointing at blob.endpoint; disable it when infra manages the route.
+  publicIngress:
+    enabled: false
+    # Host defaults to blob.publicEndpoint's host when empty.
+    host: ""
+    # Backend Service; parsed from blob.endpoint
+    # (svc.namespace.svc:port) when empty.
+    serviceName: ""
+    serviceNamespace: ""
+    servicePort: 0
+    tls: true
+    # cert-manager ClusterIssuer for the certificate; "" disables the
+    # annotation (bring your own TLS secret).
+    clusterIssuer: internal-ca
+    # Adds a Traefik headers middleware emitting Access-Control-Allow-
+    # Origin for in-browser text/media previews. Set to the console
+    # origin, e.g. https://nereidlink.example.com.
+    corsOrigin: ""
+  # Presigned/self-served download URL lifetime.
+  presignTTL: "15m"
+  # Cap one firmware upload; the HTTP layer bounds the body before streaming.
+  maxUploadBytes: 536870912
+  # Device media policy (distinct from firmware uploads above): cap one
+  # media object at 10 MiB.
+  mediaMaxBytes: 10485760
+  # Media content-type allowlist. An entry ending in "/" matches a type
+  # prefix (image/ -> image/jpeg, image/png, ...); any other entry must
+  # match exactly. Defaults match the dev profile: images, video clips,
+  # plain text and JSON; tighten to ["image/"] for an image-only fleet.
+  mediaAllowedTypes:
+    - "image/"
+    - "video/"
+    - "text/plain"
+    - "application/json"
+
+# Presence identity of this all-in-one ingress node.
+presence:
+  ingressId: "ingress-k3s-1"
+accounting:
+  nodeId: "k3s-node-1"
+
+# Credential authentication cache. Enabled explicitly here even though the
+# built-in default is off, so the chart keeps PostgreSQL off the device
+# reconnect hot path. Set l2.disabled for an L1-only node.
+credentialCache:
+  enabled: true
+  positiveTTL: "45s"
+  negativeTTL: "3s"
+  maxCost: 16777216
+  numCounters: 100000
+  l2:
+    disabled: false
+    bucket: "CREDENTIALS"
+
+# NereidHorizon model distribution (nh-model-distribution/v1). Disabled by
+# default; while disabled, model_distribution preflight blocks. Enable with an
+# org-bound NH service key carrying the model:distribute scope. apiKey is
+# rendered into the Secret overlay; the rest is ConfigMap data.
+horizon:
+  enabled: false
+  baseURL: ""
+  # Non-root NH organization bound to the API key.
+  org: ""
+  apiKey: ""
+  # Closed precision enum used when an assembly omits precision.
+  defaultPrecision: "fp16"
+  # NL gateway id -> ESS destination token ("<type>:<id>").
+  gatewayDestinations: {}
+    # gateway-1: "openhorizon.edgenode:node1"
+  # Optional PEM bundle for verifying the NH certificate.
+  caFile: ""
+  # Lab-only certificate verification opt-out; cannot combine with caFile.
+  insecureSkipVerify: false
+
+# MQTT server certificate SANs issued/refreshed by the init step
+# (`pki ensure` creates the CA, `pki server` re-signs the leaf on each start).
+# Add every hostname/IP a device uses to reach the MQTTS NodePort.
+pki:
+  serverHosts:
+    - localhost
+    - 127.0.0.1
+    - nereidlink
+    - nereidlink.nereidlink.svc.cluster.local
+    - nereidlink.example.com
+    - 192.0.2.5
+    - 192.0.2.57

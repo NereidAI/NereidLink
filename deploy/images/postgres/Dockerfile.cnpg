@@ -1,0 +1,66 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# CloudNativePG-compatible PostgreSQL 16 with TimescaleDB community edition.
+#
+# CNPG manages postgres.conf itself and runs the engine as uid 26, so the
+# stock timescale/timescaledb image (Alpine, postgres uid 705, entrypoint
+# that writes shared_preload_libraries) cannot be used as a CNPG image.
+# We extend the public CNPG catalog image (Debian bullseye, uid 26;
+# ghcr.io/cloudnative-pg/postgresql:16.4) with TimescaleDB's vendor .deb:
+#   * the PGDG apt build ships Apache-licensed binaries only and rejects
+#     compression/continuous aggregates ("functionality not supported under
+#     the current apache license"), which migration 0024 needs;
+#   * bullseye is EOL (live PGDG mirror and rotating deb.debian.org pool
+#     404), and the packagecloud CDN is unreachable through this build
+#     network, so the community packages are downloaded once on a host with
+#     packagecloud access and installed from local files (no apt repo).
+#
+# Licensing: the installed .deb is TimescaleDB Community Edition under the
+# Timescale License (TSL) -- source-available, NOT an OSI open-source license.
+# It is free to run and to redistribute embedded in NereidLink (a value-added
+# product whose users cannot modify the TimescaleDB schema), but it must not be
+# offered as a hosted/managed TimescaleDB database service. Recipients must be
+# told the component is TSL-licensed and given the license text/URL. Do not
+# strip Timescale's copyright notices. See the root THIRD_PARTY_NOTICES file
+# (section 1) and https://www.timescale.com/legal/licenses for the full terms.
+# Call the component "TimescaleDB Community Edition", not "Apache-2 Edition".
+#
+# Build:
+#   ver=2.26.4~debian11-1613
+#   base=https://packagecloud.io/timescale/timescaledb/packages/debian/bullseye
+#   curl -fLo loader.deb "$base/timescaledb-2-loader-postgresql-16_${ver}_amd64.deb/download.deb"
+#   curl -fLo ts.deb     "$base/timescaledb-2-postgresql-16_${ver}_amd64.deb/download.deb"
+#   cp loader.deb ts.deb ./
+#   docker build -f Dockerfile.cnpg \
+#       -t ghcr.io/nereidai/postgresql:16.4-timescale-tsl .
+# Publish to an internal registry with the NereidOverview harbor-sync.sh
+# tool (treaty §18); the chart default is the public GHCR coordinate.
+
+FROM ghcr.io/cloudnative-pg/postgresql:16.4
+ARG VERSION=0.0.0-dev
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=""
+LABEL license='SPDX-License-Identifier: Apache-2.0' \
+      copyright='Copyright (c) 2026: YIQISOFT' \
+      org.opencontainers.image.title='nereidlink-postgresql-cnpg' \
+      org.opencontainers.image.description='Privatized IoT data pipeline — multi-protocol device access, unified messaging, rule engine, alerting, and real-time dashboards' \
+      org.opencontainers.image.vendor='YIQISOFT' \
+      org.opencontainers.image.licenses='Apache-2.0' \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.source='https://github.com/NereidAI/NereidLink' \
+      org.opencontainers.image.url='https://github.com/NereidAI/NereidLink' \
+      org.opencontainers.image.documentation='https://github.com/NereidAI/NereidLink#readme' \
+      org.opencontainers.image.authors='NereidAI (https://github.com/NereidAI)'
+
+# This build uses deploy/images/postgres as its context for the local .deb
+# inputs. Repository-root legal files are outside that context and therefore
+# cannot be copied into this derivative image by its Dockerfile.
+USER root
+COPY loader.deb /tmp/timescaledb-loader.deb
+COPY ts.deb /tmp/timescaledb.deb
+RUN dpkg -i /tmp/timescaledb-loader.deb /tmp/timescaledb.deb \
+    && rm -f /tmp/timescaledb-*.deb
+USER 26

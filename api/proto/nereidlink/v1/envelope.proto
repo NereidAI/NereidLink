@@ -1,0 +1,58 @@
+// Copyright (C) 2026 YIQISOFT
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package nereidlink.v1;
+
+option go_package = "github.com/nereidai/nereidlink/api/gen/nereidlink/v1;v1";
+
+enum MsgType {
+  MSG_TYPE_UNSPECIFIED = 0;
+  MSG_TYPE_TELEMETRY = 1;
+  MSG_TYPE_ATTRIBUTE_REPORT = 2;
+  MSG_TYPE_EVENT = 3;
+  MSG_TYPE_PRESENCE = 4;
+  MSG_TYPE_COMMAND_REQUEST = 5;
+  MSG_TYPE_COMMAND_RESPONSE = 6;
+  MSG_TYPE_ATTRIBUTE_PUSH = 7;
+}
+
+message MediaMetadata {
+  int64 duration_ms = 1;
+  string codec = 2;
+  int32 width = 3;
+  int32 height = 4;
+  int32 bitrate = 5;
+  string thumbnail_key = 6;
+}
+
+message BlobRef {
+  string endpoint = 1;
+  string bucket = 2;
+  string key = 3;
+  int64 size = 4;
+  string content_type = 5;
+  string sha256 = 6;
+  string storage_class = 7;
+  map<string, string> tags = 8;
+  MediaMetadata media = 9;
+}
+
+message Envelope {
+  string id = 1;
+  uint32 schema_version = 2;
+  string tenant_id = 3;
+  string device_id = 4;
+  string gateway_id = 5;
+  MsgType type = 6;
+  string content_type = 7;
+  bytes payload = 8;
+  int64 event_time = 9;
+  int64 ingress_time = 10;
+  string ingress_id = 11;
+  string protocol = 12;
+  string partition_key = 13;
+  map<string, string> metadata = 14;
+  BlobRef blob_ref = 15;
+}
