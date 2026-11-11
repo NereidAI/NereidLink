@@ -67,7 +67,7 @@ jobs:
       - name: golangci-lint
         # v7 is the first action release supporting golangci-lint v2;
         # v6 rejects the v2.15.0 version string outright.
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           # Pinned to the version used locally; .golangci.yml declares v2
           # config syntax, so a v1 linter would reject it. v2.15 is the first
