@@ -1,0 +1,24 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+#
+# Local build acceleration (root treaty §17, §19.3).
+#
+# Copy this file to local.mk and fill in the endpoints for a restricted or
+# regional network. local.mk is git-ignored and must never be committed:
+#
+#     cp local.mk.example local.mk
+#
+# A developer with direct internet access needs no local.mk at all; every
+# value below stays empty, which reproduces the pristine upstream build that
+# CI runs. These variables only feed build args / toolchain environment;
+# Makefiles contain no push action regardless of this file.
+
+# Go module proxy (empty = toolchain default proxy.golang.org).
+export GOPROXY ?=
+
+# Outbound HTTP/HTTPS proxies for e.g. skopeo or npm (empty = direct).
+export HTTP_PROXY ?=
+export HTTPS_PROXY ?=
+
+# npm registry (empty = registry.npmjs.org).
+NPM_REGISTRY ?=

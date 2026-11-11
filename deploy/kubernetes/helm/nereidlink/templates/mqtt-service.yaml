@@ -1,0 +1,38 @@
+{{- /*
+Copyright (C) 2026 YIQISOFT
+SPDX-License-Identifier: Apache-2.0
+
+Dedicated NodePort service for raw MQTT (HTTP Ingress cannot proxy a
+non-HTTP protocol). Reachable on every node IP at the configured node ports:
+plain 1883 (nodePortPlain) and MQTTS 8883 (nodePortTls, served by
+NereidLink's own listener with the PKI-volume server certificate).
+*/ -}}
+{{- if .Values.mqtt.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nereidlink.fullname" . }}-mqtt
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  type: {{ .Values.mqtt.type }}
+  externalTrafficPolicy: Cluster
+  selector:
+{{ include "nereidlink.selectorLabels" . | indent 4 }}
+  ports:
+    - name: mqtt
+      port: {{ .Values.mqtt.plainPort }}
+      targetPort: mqtt
+      {{- if .Values.mqtt.nodePortPlain }}
+      nodePort: {{ .Values.mqtt.nodePortPlain }}
+      {{- end }}
+    {{- if .Values.mqtt.tls.enabled }}
+    - name: mqtts
+      port: {{ .Values.mqtt.tlsPort }}
+      targetPort: mqtts
+      {{- if .Values.mqtt.nodePortTLS }}
+      nodePort: {{ .Values.mqtt.nodePortTLS }}
+      {{- end }}
+    {{- end }}
+{{- end }}

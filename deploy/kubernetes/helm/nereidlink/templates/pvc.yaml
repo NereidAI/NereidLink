@@ -1,0 +1,22 @@
+{{- /*
+Copyright (C) 2026 YIQISOFT
+SPDX-License-Identifier: Apache-2.0
+
+Persistent state for the all-in-one pod: device PKI material, the tenant
+secret AES KEK and the license rollback clock. The KEK MUST persist or
+previously sealed tenant secrets become undecryptable after a restart.
+*/ -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "nereidlink.fullname" . }}-data
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  accessModes:
+{{ toYaml .Values.persistence.accessModes | indent 4 }}
+  storageClassName: {{ .Values.persistence.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}

@@ -1,0 +1,320 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+server:
+  http_listen: "0.0.0.0:8080"
+  ws_path: "/ws"
+  ws_read_limit: 65536
+  ws_ping_interval: "30s"
+  shutdown_timeout: "30s"
+
+registry:
+  listen: "127.0.0.1:19090"
+  module_token: "dev-module-token"
+  # Internal gRPC link TLS (ADR-0003). Server presents the cert; CAFile also
+  # enforces mutual TLS on the co-located client.
+  # tls:
+  #   enabled: true
+  #   cert_file: "/etc/nereidlink/registry.pem"
+  #   key_file: "/etc/nereidlink/registry-key.pem"
+  #   ca_file: "/etc/nereidlink/registry-ca.pem"
+
+presence:
+  ingress_id: "ingress-dev-1"
+  heartbeat_interval: "15s"
+  lease_ttl: "45s"
+  offline_batch_size: 1000
+  offline_batch_interval: "100ms"
+  persist_buffer_size: 4096
+
+# Gateway manifest reconciliation (ADR-0026). The edge publishes its full
+# online sub-device list on 5-minute wall-clock boundaries; the lease must
+# span several missed cycles before sub-devices are derived offline.
+manifest:
+  lease_ttl: "16m"
+  sweep_interval: "1m"
+
+# Gateway application watchdog (ADR-0026). Empty fields use the ADR defaults
+# (heartbeat 30s, SUSPECT after 45s, DOWN after 90s, sweep 10s, flap at >=5
+# unplanned downs within 10m).
+link_health:
+  heartbeat_interval: "30s"
+  suspect_after: "45s"
+  down_after: "90s"
+  sweep_interval: "10s"
+  flap_window: "10m"
+  flap_threshold: 5
+
+# Gateway link-down escalation and daily digest (ADR-0026). Empty fields use
+# defaults: bump an open MAJOR outage to CRITICAL after 30m, send the previous
+# UTC-day digest once at 08:00 UTC to tenant administrators.
+link_notify:
+  escalation_after: "30m"
+  escalation_sweep_interval: "1m"
+  digest_enabled: true
+  digest_hour_utc: 8
+  digest_sweep_interval: "1m"
+
+# Edge connector desired/reported lifecycle alarm sweeps (ADR-0026). Empty
+# fields use defaults: WARNING when a desired revision is not APPLIED within
+# 5m; a continuously FAILED connector escalates MAJOR→CRITICAL after 1h.
+connector:
+  pending_after: "5m"
+  failed_escalation_after: "1h"
+  sweep_interval: "1m"
+
+# Gateway auto-provisioning from the NereidEdge discovery uplink
+# (v1/gateway/discovery). Disabled by default: an operator opts in. When
+# enabled, reported local devices are created bound to the gateway and their
+# local_id -> device_id mapping is returned on v1/gateway/discovery/result.
+auto_provision:
+  enabled: false
+  max_per_cycle: 100
+  max_candidates: 1000
+  default_profile: ""
+
+# On-demand gateway probes (ADR-0026 section 9). Empty/zero fields fall back
+# to the defaults: 100 devices/task, 1 QPS and 5 concurrent per principal,
+# 10s per-device cooldown, 10s probe and 60s task deadlines, 24h retention.
+probe:
+  max_devices: 100
+  create_rate: "1s"
+  max_concurrent: 5
+  cooldown: "10s"
+  default_timeout: "10s"
+  task_deadline: "60s"
+  retention: "24h"
+  sweep_interval: "1m"
+
+# S3-compatible blob offload (ADR-0006): firmware packages, bulk files and
+# cold archives. Empty endpoint disables blob features. The internal endpoint
+# is used for put/list/delete; public_endpoint is embedded in presigned
+# download URLs that gateways/edges actually reach.
+#
+# Binary object storage (ADR-0006). Dev defaults to the local directory
+# backend so testing needs no object-store dependency. Switch provider to
+# "s3" (or "auto", which prefers S3 when its fields are complete) and use
+# the S3 fields below for multi-node deployments.
+blob:
+  provider: local
+  local:
+    directory: "./data/blobs"
+  presign_ttl: "15m"
+  max_upload_bytes: 536870912
+  # Device media policy: demo accepts images, video and plain text.
+  media_max_bytes: 10485760
+  media_allowed_types:
+    - "image/"
+    - "video/"
+    - "text/plain"
+    - "application/json"
+  # --- S3 fields (provider: s3) -----------------------------------------
+  # Non-production placeholders; override them for your object store.
+  endpoint: "127.0.0.1:8333"
+  public_endpoint: "s3.example.com"
+  region: "us-east-1"
+  access_key: "nereidlink-dev"
+  secret_key: "nereidlink-dev-only"
+  bucket: "nereidlink"
+  secure: false
+
+nats:
+  url: "nats://127.0.0.1:4222"
+  # Internal-link TLS (ADR-0003). Enable in production; TLS 1.3 only.
+  # tls:
+  #   enabled: true
+  #   ca_file: "/etc/nereidlink/nats-ca.pem"
+  #   cert_file: "/etc/nereidlink/nats-client.pem"
+  #   key_file: "/etc/nereidlink/nats-client-key.pem"
+
+bus:
+  compression:
+    # off (default) / fast / balanced / max
+    level: "balanced"
+    # messages below this are not compressed; 0 uses the codec default (256)
+    min_bytes: 0
+
+ingest_limit:
+  # per-device steady-state frames/second; 0 = unlimited
+  per_device_rate: 100
+  # burst bucket; 0 = one second of rate
+  per_device_burst: 100
+  sweep_interval: "1m"
+  idle: "10m"
+  # ADR-0014 flood alarm: rejections within flood_window that cross
+  # flood_threshold open a DEVICE_INGEST_FLOOD alarm; a calm flood_recover
+  # interval auto-clears it. 0 disables.
+  flood_threshold: 200
+  flood_window: "10s"
+  flood_recover: "2m"
+
+# ADR-0014 online-but-silent detection. Only points whose descriptor sets
+# expected_period_seconds are monitored; the sweep raises ONLINE_BUT_SILENT
+# when such a device is connected but reports nothing past
+# expected_period_seconds * tolerance_multiplier, and auto-clears on resume
+# or disconnect.
+silence_detection:
+  enabled: true
+  sweep_interval: "60s"
+
+retention:
+  # automatic data-retention sweep cadence (ADR-0005)
+  sweep_interval: "24h"
+
+postgres:
+  dsn: "postgres://nereidlink:nereidlink@127.0.0.1:5432/nereidlink?sslmode=disable"
+
+ingest_mqtt:
+  listen: "0.0.0.0:1883"
+  # mTLS listener; files are created by "nereidlink pki init".
+  tls_listen: "0.0.0.0:8883"
+  tls_cert_file: "configs/pki/server.pem"
+  tls_key_file: "configs/pki/server-key.pem"
+  tls_client_ca_file: "configs/pki/ca.pem"
+  # false (default): MQTTS, client cert optional; true: strict mTLS only.
+  tls_require_client_cert: false
+
+ingest_http:
+  ingress_id: "ingress-dev-http-1"
+  long_poll_wait: "25s"
+  session_ttl: "90s"
+  sweep_interval: "15s"
+  mailbox_size: 16
+  max_telemetry_bytes: 65536
+
+telemetry:
+  flush_interval: "500ms"
+  flush_size: 1000
+  max_ack_pending: 10000
+  dedup_window: 100000
+
+command:
+  default_timeout: "30s"
+  persistent_ttl: "24h"
+  delivery_timeout: "5s"
+  sweep_interval: "5s"
+  claim_batch_size: 100
+  max_body_bytes: 65536
+  max_batch_targets: 1000
+
+notify:
+  frequency_window: "5m"
+  webhook_url: "http://127.0.0.1:19099/hook"
+  smtp:
+    enabled: false
+    host: "127.0.0.1"
+    port: 25
+    from: "nereidlink@example.com"
+  critical_workers: 4
+  workers: 4
+  delivery_timeout: "5s"
+
+# Independent platform fallback channel (ADR-0019). Its endpoint must
+# differ from notify.webhook_url so a broken tenant notification path
+# cannot hide a platform outage. Probes are the PostgreSQL pool and the
+# NATS link; threshold consecutive failures raise one CRITICAL report.
+deadman:
+  enabled: true
+  webhook_url: "http://127.0.0.1:19099/deadman"
+  smtp:
+    enabled: false
+    host: "127.0.0.1"
+    port: 25
+    from: "nereidlink@example.com"
+  email_recipients: []
+  interval: "15s"
+  threshold: 3
+  timeout: "5s"
+
+# Resource accounting (ADR-0025). One frame in sample_rate is recorded per
+# dimension, reduced locally to a bounded heavy-hitter view and published
+# to nl.accounting.<node> for cluster aggregation. Load rejects any value
+# that would make accounting more than a diagnostic channel.
+accounting:
+  enabled: true
+  node_id: "dev-node-1"
+  sample_rate: 10
+  capacity: 256
+  report_interval: "30s"
+  top_n: 20
+
+rules:
+  max_ack_pending: 10000
+  reload_interval: "3s"
+  script_timeout: "1s"
+
+seed:
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  device_id: "00000000-0000-0000-0000-000000000100"
+  device_token: "seed-device-token"
+
+module:
+  heartbeat_lease: "30s"
+  sweep_interval: "10s"
+
+provision:
+  poll_interval: "5s"
+  lease: "2m"
+  max_attempts: 10
+  min_backoff: "2s"
+  max_backoff: "5m"
+
+identity:
+  jwt_secret: "dev-only-change-me-0123456789abcdef"
+  access_ttl: "30m"
+  refresh_ttl: "168h"
+
+# External OIDC single sign-on (ADR-0021). Disabled by default; set enabled:
+# true and register the redirect_url at the IdP.
+oidc:
+  enabled: false
+  # issuer: "https://idp.example/realms/nereidlink"
+  # client_id: "nereidlink"
+  # client_secret: "change-me"
+  # redirect_url: "http://localhost:8080/v1/auth/oidc/callback"
+  # frontend_base_url: "http://localhost:5173"
+  # tenant_id: "00000000-0000-0000-0000-000000000000"
+  # default_role: "READ_ONLY"
+  # groups_claim: "groups"
+  # group_role:
+  #   "/nereidlink/admins": "TENANT_ADMIN"
+  #   "/nereidlink/engineers": "ENGINEER"
+  # state_ttl: "10m"
+
+license:
+  public_key_path: "configs/license/public.pem"
+  grace_period: "168h"
+  clock_file: "/tmp/opencode/nereidlink-license-clock"
+
+ops_admin:
+  # Physically separated ADR-0023 listener; loopback-only in dev.
+  listen: "127.0.0.1:19190"
+  shutdown_timeout: "10s"
+
+# Credential authentication cache (L1 ristretto + L2 NATS KV). Disabled by
+# default; every new connection then resolves credentials in PostgreSQL.
+# Enable it on multi-node or reconnect-storm-prone deployments.
+credential_cache:
+  enabled: false
+  positive_ttl: "45s"
+  negative_ttl: "3s"
+  max_cost: 16777216
+  num_counters: 100000
+  l2:
+    disabled: false
+    bucket: "CREDENTIALS"
+
+# NereidHorizon model distribution (nh-model-distribution/v1). Disabled by
+# default; while disabled, model_distribution preflight blocks with
+# model_distribution_unavailable. Enable in a Secret overlay in production:
+# api_key is a credential and must never be committed.
+horizon:
+  enabled: false
+  # base_url: "https://nereidhorizon.example"
+  # org: "yiqisoft"                       # non-root org bound to the API key
+  # api_key: "<nh-service-api-key>"       # model:distribute scope; Secret only
+  # default_precision: "fp16"             # fp16 | int8, used when an assembly omits precision
+  # gateway_destinations:                 # NL gateway id -> ESS destination token
+  #   "gateway-1": "openhorizon.edgenode:node1"
+  # ca_file: "/etc/nereidlink/nh-ca.pem"
+  # insecure_skip_verify: false           # lab only; cannot combine with ca_file

@@ -1,0 +1,14 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Compose override that runs NATS with per-module permission hardening.
+# Usage:
+#   docker compose -f docker-compose.dev.yml \
+#       -f deploy/nats/docker-compose.hardened.yml up -d nats
+
+services:
+  nats:
+    entrypoint: ["nats-server"]
+    command: ["-js", "-m", "8222", "-c", "/etc/nats/server.hardened.conf"]
+    volumes:
+      - ../../deploy/nats/server.hardened.conf:/etc/nats/server.hardened.conf:ro

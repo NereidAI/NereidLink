@@ -1,0 +1,56 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# NereidLink with NereidSphere (NS) ticket SSO.
+# This example shows the sso section configuration for NS one-time
+# handoff ticket mode. The identity plane lives entirely in NS; NL only
+# exchanges the 30-second ticket server-to-server.
+#
+# Prerequisites (the identity plane owns this declaratively):
+#   - NereidSphere (NS) deployed and reachable at nsBaseURL
+#   - NS products list contains the product, e.g.
+#       - id: "link"
+#         url: "https://nereidlink.example.com"
+#         mode: "ns"
+#         sso_callback_path: "/auth/ns-callback"
+#         sso_secret: "<shared secret>"
+#   - Keycloak realm (via NereidIdentity) configured for NS OIDC login
+#
+# Usage:
+#   helm upgrade -i nereidlink ./nereidlink -n nereidlink --create-namespace \
+#     -f examples/ha.yaml -f examples/sso-ns-ticket.yaml
+# sso.enabled and oidc.enabled are mutually exclusive.
+
+sso:
+  enabled: true
+  nsBaseURL: "https://nereidsphere.example.com"
+  # Must equal the product id in NS (ticket audience).
+  clientID: "link"
+  # Must equal the product sso_secret registered in NS.
+  ssoSecret: "REPLACE_WITH_PRODUCT_SSO_SECRET"
+  # Must equal the product sso_callback_path registered in NS.
+  callbackPath: "/auth/ns-callback"
+  frontendBaseURL: "https://nereidlink.example.com"
+  tenantID: "00000000-0000-0000-0000-000000000001"
+  defaultRole: "READ_ONLY"
+  # Keycloak realm roles carried in the ticket identity (identity.roles)
+  # map to built-in NL roles on the no-groups fallback path. Platform
+  # admin linkage is by email match: an IdP user whose email equals the
+  # bootstrap admin email joins the existing platform admin account.
+  roleMap:
+    admin: TENANT_ADMIN
+  # /nereidlink/{tenant}/{role} group segments -> built-in roles. Each
+  # assignment materialises as a local tenant membership on login; roles
+  # removed in the NS console are reconciled away on the next login.
+  groupRole:
+    admins: TENANT_ADMIN
+    engineers: ENGINEER
+    read_only: READ_ONLY
+  reconcileMemberships: true
+  # Secret in THIS namespace carrying the internal CA PEM that signs the
+  # NS ingress certificate.
+  caBundleSecret: "nereid-internal-ca-tls"
+  caBundleKey: "ca.crt"
+
+oidc:
+  enabled: false

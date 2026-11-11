@@ -1,0 +1,344 @@
+{
+  "schema_version": "nereidlink.business-expansion/v1",
+  "instance_id": "face-access-control-instance",
+  "generation": 3,
+  "template": {
+    "id": "face-access-control",
+    "version": "0.0.1"
+  },
+  "digest": "0daa23c8045b30c1787dd61d9595c6134d967410a365fcd25e8cc1f9bdb024d0",
+  "artifacts": [
+    {
+      "key": "companion_subscription:pipeline:companion:gateway-1",
+      "kind": "companion_subscription",
+      "gateway_id": "gateway-1",
+      "device_id": "face-access-control-conclusions-1",
+      "depends_on": [
+        "pipeline_registration:pipeline:gateway-1"
+      ],
+      "spec": {
+        "companion_id": "face-service",
+        "conclusion_device_id": "face-access-control-conclusions-1",
+        "pipeline_id": "face-recognition-v1",
+        "source": "PipelineJSON",
+        "source_devices": [
+          "face-camera-1"
+        ]
+      }
+    },
+    {
+      "key": "inference_binding:camera:pipeline",
+      "kind": "inference_binding",
+      "gateway_id": "gateway-1",
+      "device_id": "face-output-1",
+      "depends_on": [
+        "model_distribution:model-embedding:gateway-1",
+        "model_distribution:model:gateway-1",
+        "pipeline_registration:pipeline:gateway-1"
+      ],
+      "spec": {
+        "config": {
+          "DecodeAccel": "vaapi",
+          "FPS": 5,
+          "PipelineId": "face-recognition-v1",
+          "PublishMode": "",
+          "PublishReadings": [
+            "PipelineJSON"
+          ],
+          "SourceDevice": "face-camera-1",
+          "SourceKind": "onvif-camera",
+          "StreamProfile": "main",
+          "TargetDevice": "CPU",
+          "VAAPIDevice": "renderD128"
+        },
+        "connector_type": "edge-inference",
+        "device_id": "face-output-1",
+        "type_version": "1"
+      }
+    },
+    {
+      "key": "model_distribution:model-embedding:gateway-1",
+      "kind": "model_distribution",
+      "gateway_id": "gateway-1",
+      "depends_on": [],
+      "spec": {
+        "ensure": true,
+        "model_id": "face-embedding",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "key": "model_distribution:model:gateway-1",
+      "kind": "model_distribution",
+      "gateway_id": "gateway-1",
+      "depends_on": [],
+      "spec": {
+        "ensure": true,
+        "model_id": "face-detector",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "key": "northbound_channel:rule:northbound",
+      "kind": "northbound_channel",
+      "gateway_id": "gateway-1",
+      "device_id": "face-access-control-conclusions-1",
+      "depends_on": [
+        "rule_chain:rule"
+      ],
+      "spec": {
+        "channel": "face-access.v1",
+        "device_id": "face-access-control-conclusions-1",
+        "edgex_device_name": "face-access-control-edgex-conclusions",
+        "edgex_profile_name": "face-access-control-conclusion-profile",
+        "edgex_resource_names": [
+          "matched",
+          "personId",
+          "score"
+        ],
+        "forwarder_id": "forwarder-1",
+        "readings": [
+          "matched",
+          "personId",
+          "score"
+        ],
+        "rule_id": "rule",
+        "source_node_id": "rule"
+      }
+    },
+    {
+      "key": "northbound_filter:gateway-1",
+      "kind": "northbound_filter",
+      "gateway_id": "gateway-1",
+      "depends_on": [
+        "northbound_channel:rule:northbound"
+      ],
+      "spec": {
+        "config": {
+          "default_action": "allow",
+          "enabled": true,
+          "rules": [
+            {
+              "action": "allow",
+              "device_names": [
+                "face-access-control-edgex-conclusions"
+              ],
+              "profile_names": [
+                "face-access-control-conclusion-profile"
+              ],
+              "resource_names": [
+                "matched",
+                "personId",
+                "score"
+              ]
+            },
+            {
+              "action": "deny",
+              "device_names": [
+                "face-access-control-edgex-conclusions"
+              ],
+              "profile_names": [
+                "face-access-control-conclusion-profile"
+              ]
+            }
+          ]
+        },
+        "connector_type": "edge-northbound-filter",
+        "device_id": "",
+        "type_version": "1"
+      }
+    },
+    {
+      "key": "pipeline_registration:pipeline:gateway-1",
+      "kind": "pipeline_registration",
+      "gateway_id": "gateway-1",
+      "depends_on": [
+        "model_distribution:model-embedding:gateway-1",
+        "model_distribution:model:gateway-1"
+      ],
+      "spec": {
+        "config": {
+          "manager_device": "nereid-inference",
+          "pipeline_id": "face-recognition-v1",
+          "resource": "PipelinesJSON"
+        },
+        "connector_type": "edge-manager-resource",
+        "device_id": "",
+        "type_version": "1"
+      }
+    },
+    {
+      "key": "rule_chain:rule",
+      "kind": "rule_chain",
+      "device_id": "face-access-control-conclusions-1",
+      "depends_on": [
+        "companion_subscription:pipeline:companion:gateway-1"
+      ],
+      "spec": {
+        "device_id": "face-access-control-conclusions-1",
+        "graph": {
+          "nodes": [
+            {
+              "id": "rule:door-debounce",
+              "type": "debounce",
+              "name": "Door command debounce",
+              "config": {
+                "interval_ms": 3000,
+                "key_fields": [
+                  "camera"
+                ]
+              },
+              "position_x": 480,
+              "position_y": 0
+            },
+            {
+              "id": "rule:door:action-door",
+              "type": "send-command",
+              "name": "Open door",
+              "config": {
+                "command_name": "OpenDoor",
+                "params": {},
+                "target_device_id": "face-access-control-command-target-1",
+                "timeout_ms": 3000
+              },
+              "position_x": 720,
+              "position_y": 0
+            },
+            {
+              "id": "rule:forward:northbound",
+              "type": "forward",
+              "name": "Forward Access conclusions",
+              "config": {
+                "channel": "face-access.v1",
+                "fields": [
+                  "matched",
+                  "personId",
+                  "score"
+                ],
+                "forwarder_id": "forwarder-1"
+              },
+              "position_x": 720,
+              "position_y": 160
+            },
+            {
+              "id": "rule:matched",
+              "type": "declarative-filter",
+              "name": "Matched above threshold",
+              "config": {
+                "all": [
+                  {
+                    "field": "matched",
+                    "op": "eq",
+                    "value": true
+                  },
+                  {
+                    "field": "score",
+                    "op": "gt",
+                    "value": 0.72
+                  }
+                ]
+              },
+              "position_x": 0,
+              "position_y": 0
+            },
+            {
+              "id": "rule:unknown",
+              "type": "declarative-filter",
+              "name": "Unknown person",
+              "config": {
+                "all": [
+                  {
+                    "field": "matched",
+                    "op": "eq",
+                    "value": false
+                  }
+                ]
+              },
+              "position_x": 0,
+              "position_y": 160
+            },
+            {
+              "id": "rule:unknown-sustained",
+              "type": "sustained",
+              "name": "Sustained unknown person",
+              "config": {
+                "duration_ms": 10000,
+                "key_fields": [
+                  "camera"
+                ]
+              },
+              "position_x": 240,
+              "position_y": 160
+            },
+            {
+              "id": "rule:unknown:action-unknown-alarm",
+              "type": "create-alarm",
+              "name": "Unknown person alarm",
+              "config": {
+                "alarm_type": "BUSINESS_UNKNOWN_PERSON",
+                "propagate": false,
+                "severity": "MAJOR"
+              },
+              "position_x": 480,
+              "position_y": 160
+            },
+            {
+              "id": "rule:working-hours",
+              "type": "time-window",
+              "name": "Working hours",
+              "config": {
+                "end": "18:00",
+                "start": "08:00"
+              },
+              "position_x": 240,
+              "position_y": 0
+            }
+          ],
+          "edges": [
+            {
+              "from": "rule:door-debounce",
+              "to": "rule:door:action-door",
+              "relation": "True"
+            },
+            {
+              "from": "rule:matched",
+              "to": "rule:door-debounce",
+              "relation": "False"
+            },
+            {
+              "from": "rule:matched",
+              "to": "rule:working-hours",
+              "relation": "True"
+            },
+            {
+              "from": "rule:unknown",
+              "to": "rule:unknown-sustained",
+              "relation": "False"
+            },
+            {
+              "from": "rule:unknown",
+              "to": "rule:unknown-sustained",
+              "relation": "True"
+            },
+            {
+              "from": "rule:unknown-sustained",
+              "to": "rule:unknown:action-unknown-alarm",
+              "relation": "True"
+            },
+            {
+              "from": "rule:working-hours",
+              "to": "rule:door-debounce",
+              "relation": "False"
+            },
+            {
+              "from": "rule:working-hours",
+              "to": "rule:door-debounce",
+              "relation": "True"
+            }
+          ]
+        },
+        "name": "Access decisions"
+      }
+    }
+  ]
+}

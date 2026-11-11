@@ -1,0 +1,70 @@
+// Copyright (C) 2026 YIQISOFT
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package nereidlink.v1;
+
+option go_package = "github.com/nereidai/nereidlink/api/gen/nereidlink/v1;v1";
+
+// Command is a single device command routed from an application through the
+// platform to one device. It is the payload of the Core NATS dispatch
+// request. Params carries a JSON document verbatim.
+message Command {
+  // ID is the globally unique command identifier used for correlation.
+  string id = 1;
+
+  // TenantID owns the target device.
+  string tenant_id = 2;
+
+  // DeviceID is the target device identifier.
+  string device_id = 3;
+
+  // Name identifies the command in the Command Catalog.
+  string name = 4;
+
+  // Params is the raw JSON parameter document.
+  bytes params = 5;
+
+  // Interaction is "one-way" or "request-response".
+  string interaction = 6;
+
+  // Timeliness is "realtime" or "persistent".
+  string timeliness = 7;
+
+  // TimeoutMS bounds the wait for a device response in milliseconds.
+  int64 timeout_ms = 8;
+
+  // CreatedAtMS is the platform creation timestamp in milliseconds.
+  int64 created_at_ms = 9;
+
+  // GatewayID names the owning gateway when the target is an attached
+  // sub-device. Empty means the device is directly connected and the relay
+  // delivers on the direct v1/me/cmd topic; a non-empty value routes the
+  // frame to the gateway session on v1/gateway/command.
+  string gateway_id = 10;
+
+  // Direction tells the edge which south-side operation to perform:
+  // "read" (return a value, no side effects) or "write" (apply Params).
+  // Empty keeps the edge's legacy capability-based inference.
+  string direction = 11;
+}
+
+// CommandAck is the reply to a dispatch request and the terminal result
+// recorded for the command.
+message CommandAck {
+  // ID correlates the ack with the command.
+  string id = 1;
+
+  // Status is one of the command lifecycle states.
+  string status = 2;
+
+  // Response carries the raw JSON device response.
+  bytes response = 3;
+
+  // Error carries a machine-readable failure detail.
+  string error = 4;
+
+  // FinishedAtMS is the terminal transition time in milliseconds.
+  int64 finished_at_ms = 5;
+}

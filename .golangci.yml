@@ -1,0 +1,35 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+version: "2"
+
+run:
+  timeout: 5m
+  go: "1.27"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - gosec
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec]
+      # Topic constants legitimately contain the word "secrets" (the frame
+      # family path); gosec G101 reads them as hardcoded credentials. Both
+      # the internal MQTT API and the published device SDK define such paths.
+      - path: (internal/mqttapi|sdk/device/go)/topics\.go
+        linters: [gosec]
+        text: "G101: Potential hardcoded credentials"
+
+# formatters has no "default" key in the v2 schema (unlike linters); an
+# unknown key is silently ignored by `golangci-lint run` but rejected by
+# `golangci-lint config verify`, which the CI action runs first.
+formatters:
+  enable:
+    - gofmt

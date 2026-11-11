@@ -1,0 +1,24 @@
+// Copyright (C) 2026 YIQISOFT
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package nereidlink.v1;
+
+option go_package = "github.com/nereidai/nereidlink/api/gen/nereidlink/v1;v1";
+
+// PresenceValue is the value stored at presence.<tenant>.<device>.
+// It records which ingress owns the live session and the fencing token.
+message PresenceValue {
+  // SessionID is the monotonic fencing token of the live session.
+  string session_id = 1;
+
+  // IngressID identifies the node that owns the transport session.
+  string ingress_id = 2;
+
+  // GatewayID is set when the device session is attached via a gateway.
+  string gateway_id = 3;
+
+  // ConnectedAt is the session start time in milliseconds.
+  int64 connected_at = 4;
+}

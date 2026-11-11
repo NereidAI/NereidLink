@@ -1,0 +1,90 @@
+{{- /*
+Copyright (C) 2026 YIQISOFT
+SPDX-License-Identifier: Apache-2.0
+
+HTTP/WS ingress with path-based frontend/backend splitting. Traefik
+performs the TLS edge (certificate issued by the internal-ca cluster
+issuer); the WebSocket upgrade on the configured ws path is handled by the
+same backend route because HTTP Upgrade is connection-scoped. Every
+non-/v1 backend HTTP route must be added to the backend prefixes below;
+everything else is the SPA and goes to the frontend nginx Service.
+*/ -}}
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "nereidlink.fullname" . }}
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: internal-ca
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          # ---- backend: REST API, OIDC and device ingest ----
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "nereidlink.fullname" . }}
+                port:
+                  number: {{ .Values.service.httpPort }}
+          # ---- backend: the single WebSocket ----
+          - path: {{ .Values.ingress.wsPath }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "nereidlink.fullname" . }}
+                port:
+                  number: {{ .Values.service.httpPort }}
+          # ---- backend: Swagger UI and the embedded OpenAPI spec ----
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "nereidlink.fullname" . }}
+                port:
+                  number: {{ .Values.service.httpPort }}
+          # ---- backend: Prometheus metrics ----
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "nereidlink.fullname" . }}
+                port:
+                  number: {{ .Values.service.httpPort }}
+          # ---- backend: health probes (pod probes use the Service directly) ----
+          - path: /healthz
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "nereidlink.fullname" . }}
+                port:
+                  number: {{ .Values.service.httpPort }}
+          # ---- backend: the NS SSO browser callback (default /auth/ns-callback),
+          # the only browser-facing backend route outside /v1 ----
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "nereidlink.fullname" . }}
+                port:
+                  number: {{ .Values.service.httpPort }}
+          # ---- frontend: SPA index, hashed assets and client-side routes ----
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "nereidlink.frontendName" . }}
+                port:
+                  number: {{ .Values.frontend.service.port }}
+{{- end }}

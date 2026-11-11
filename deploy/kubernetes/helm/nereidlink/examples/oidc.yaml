@@ -1,0 +1,41 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Example values for enabling external OIDC single sign-on (ADR-0021). Copy
+# this file, fill in the IdP details and apply with:
+#
+#   helm upgrade --install nereidlink deploy/kubernetes/helm/nereidlink \
+#       -n nereidlink \
+#       --set license.existingSecret=nereidlink-license-key \
+#       -f deploy/kubernetes/helm/nereidlink/examples/oidc.yaml
+#
+# The client secret is rendered into the namespaced config Secret; keep this
+# file out of version control with real values or supply it via --set / a
+# secrets manager. Enabling OIDC runs discovery at startup — a wrong issuer
+# makes the pod fail fast until fixed.
+
+oidc:
+  enabled: true
+  issuer: "https://keycloak.example.com/realms/nereidlink"
+  clientID: "nereidlink"
+  clientSecret: "CHANGE_ME"
+  # Leave empty to default to https://<ingress host>/v1/auth/oidc/callback;
+  # register this exact URI at the IdP as an allowed redirect URI.
+  redirectURL: ""
+  # Leave empty to default to the ingress origin (SPA /auth/callback).
+  frontendBaseURL: ""
+  scopes: ["openid", "email", "profile"]
+  # Tenant JIT-provisioned users are attached to; defaults to the seed tenant.
+  tenantID: "00000000-0000-0000-0000-000000000001"
+  # Role when no IdP group maps: TENANT_ADMIN / ENGINEER / CUSTOMER_USER /
+  # READ_ONLY. PLATFORM_ADMIN and SERVICE_ACCOUNT can never come from IdP.
+  defaultRole: "READ_ONLY"
+  groupsClaim: "groups"
+  groupRole:
+    "/nereidlink/admins": "TENANT_ADMIN"
+    "/nereidlink/engineers": "ENGINEER"
+  stateTTL: "10m"
+  # When the IdP presents an internal/private CA, name an existing Secret in
+  # this namespace carrying the CA PEM (and the key under caBundleKey).
+  caBundleSecret: ""
+  caBundleKey: "ca.crt"

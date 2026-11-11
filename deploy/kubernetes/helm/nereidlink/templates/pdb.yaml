@@ -1,0 +1,24 @@
+{{- /*
+Copyright (C) 2026 YIQISOFT
+SPDX-License-Identifier: Apache-2.0
+
+Pod disruption budget for the all-in-one deployment. Only meaningful with
+more than one replica: it keeps at least one pod serving during voluntary
+disruptions (node drains, rolling upgrades). Leader election makes any
+surviving replica take over the exclusive background roles.
+*/ -}}
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.replicaCount) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "nereidlink.fullname" . }}
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+{{ include "nereidlink.selectorLabels" . | indent 6 }}
+      app.kubernetes.io/component: app
+{{- end }}

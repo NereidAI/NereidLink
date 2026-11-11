@@ -1,0 +1,28 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Example configuration for the LwM2M southbound module. The Eclipse
+# Leshan server runs as a separate container and this bridge process
+# translates its object model into platform telemetry and commands.
+
+# Core platform endpoints.
+core:
+  nats_url: "nats://core:4222"
+  registry_grpc: "core:19090"
+  registry_token: "dev-module-token"
+  management_url: "http://core:8080"
+
+# Enrollment of this module.
+module:
+  enrollment_token: "<token-from-provisioning>"
+  heartbeat_interval: "10s"
+
+# Leshan integration.
+lwm2m:
+  # Base URL of the Leshan server REST API.
+  server_url: "http://leshan:8085"
+  # CoAP endpoint devices connect to (advertised by Leshan).
+  coap_listen: ":5685"
+  # Poll interval for registration and notification events when no
+  # server-side event extension is installed.
+  event_poll_interval: "5s"

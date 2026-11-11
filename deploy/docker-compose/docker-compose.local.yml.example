@@ -1,0 +1,27 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Local-only convenience edge for trying the split stack without a host
+# nginx. Copy to docker-compose.local.yml (git-ignored) and start with:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+#
+# Then open http://127.0.0.1:18082 — the edge service gives the browser a
+# single origin and splits API/WS paths to the backend and everything else
+# to the static frontend. The published port is loopback-only. This file is
+# not part of the production deployment; Mode A (host nginx) and Mode B
+# (standalone certbot edge) are documented in this directory's README.md.
+
+services:
+  edge:
+    image: nginx:alpine
+    ports:
+      - "127.0.0.1:18082:80"
+    volumes:
+      - ./nginx/edge-local.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      nereidlink:
+        condition: service_started
+      frontend:
+        condition: service_started
+    restart: unless-stopped

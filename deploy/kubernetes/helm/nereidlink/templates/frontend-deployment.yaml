@@ -1,0 +1,64 @@
+{{- /*
+Copyright (C) 2026 YIQISOFT
+SPDX-License-Identifier: Apache-2.0
+
+The stateless frontend tier: nginx serving the built Vite console with no
+backend proxying (the Ingress path table splits API/WS/browser traffic).
+No PVC, init containers or config volumes; it scales and schedules
+independently of the stateful backend Deployment.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nereidlink.frontendName" . }}
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "nereidlink.frontendName" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "nereidlink.frontendName" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: frontend
+    spec:
+      imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 8 }}
+      # Official nginx image: master runs as root, workers drop to the
+      # image's nginx user; PID/temp paths are redirected under /tmp in
+      # deploy/images/frontend/nginx.conf, so no writable volume is needed.
+      containers:
+        - name: nereidlink-frontend
+          image: {{ include "nereidlink.frontendImage" . }}
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+{{ toYaml .Values.frontend.resources | indent 12 }}
+      nodeSelector:
+{{ toYaml .Values.frontend.nodeSelector | indent 8 }}

@@ -1,0 +1,300 @@
+{
+  "schema_version": "nereidlink.business-expansion/v1",
+  "instance_id": "meter-reading-instance",
+  "generation": 3,
+  "template": {
+    "id": "meter-reading",
+    "version": "1.0.0"
+  },
+  "digest": "ec2a111319e706f98a0deabdc2566fb877c8b10a275ed8301b3f2ec476c9a259",
+  "artifacts": [
+    {
+      "key": "companion_subscription:pipeline:companion:gateway-1",
+      "kind": "companion_subscription",
+      "gateway_id": "gateway-1",
+      "device_id": "meter-reading-conclusions-1",
+      "depends_on": [
+        "pipeline_registration:pipeline:gateway-1"
+      ],
+      "spec": {
+        "companion_id": "meter-service",
+        "conclusion_device_id": "meter-reading-conclusions-1",
+        "pipeline_id": "meter-reader-v1",
+        "source": "PipelineJSON",
+        "source_devices": [
+          "meter-reading-camera-1"
+        ]
+      }
+    },
+    {
+      "key": "inference_binding:camera:pipeline",
+      "kind": "inference_binding",
+      "gateway_id": "gateway-1",
+      "device_id": "meter-reading-output-1",
+      "depends_on": [
+        "model_distribution:model:gateway-1",
+        "pipeline_registration:pipeline:gateway-1"
+      ],
+      "spec": {
+        "config": {
+          "DecodeAccel": "vaapi",
+          "FPS": 5,
+          "PipelineId": "meter-reader-v1",
+          "PublishMode": "",
+          "PublishReadings": [
+            "PipelineJSON"
+          ],
+          "SourceDevice": "meter-reading-camera-1",
+          "SourceKind": "onvif-camera",
+          "StreamProfile": "main",
+          "TargetDevice": "CPU",
+          "VAAPIDevice": "renderD128"
+        },
+        "connector_type": "edge-inference",
+        "device_id": "meter-reading-output-1",
+        "type_version": "1"
+      }
+    },
+    {
+      "key": "model_distribution:model:gateway-1",
+      "kind": "model_distribution",
+      "gateway_id": "gateway-1",
+      "depends_on": [],
+      "spec": {
+        "ensure": true,
+        "model_id": "meter-reading-model-1",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "key": "northbound_channel:rule:northbound",
+      "kind": "northbound_channel",
+      "gateway_id": "gateway-1",
+      "device_id": "meter-reading-conclusions-1",
+      "depends_on": [
+        "rule_chain:rule"
+      ],
+      "spec": {
+        "channel": "meter-reading.v1",
+        "device_id": "meter-reading-conclusions-1",
+        "edgex_device_name": "meter-reading-edgex-conclusions",
+        "edgex_profile_name": "meter-reading-conclusion-profile",
+        "edgex_resource_names": [
+          "confidence",
+          "meterId",
+          "unit",
+          "value"
+        ],
+        "forwarder_id": "forwarder-1",
+        "readings": [
+          "confidence",
+          "meterId",
+          "unit",
+          "value"
+        ],
+        "rule_id": "rule",
+        "source_node_id": "rule"
+      }
+    },
+    {
+      "key": "northbound_filter:gateway-1",
+      "kind": "northbound_filter",
+      "gateway_id": "gateway-1",
+      "depends_on": [
+        "northbound_channel:rule:northbound"
+      ],
+      "spec": {
+        "config": {
+          "default_action": "allow",
+          "enabled": true,
+          "rules": [
+            {
+              "action": "allow",
+              "device_names": [
+                "meter-reading-edgex-conclusions"
+              ],
+              "profile_names": [
+                "meter-reading-conclusion-profile"
+              ],
+              "resource_names": [
+                "confidence",
+                "meterId",
+                "unit",
+                "value"
+              ]
+            },
+            {
+              "action": "deny",
+              "device_names": [
+                "meter-reading-edgex-conclusions"
+              ],
+              "profile_names": [
+                "meter-reading-conclusion-profile"
+              ]
+            }
+          ]
+        },
+        "connector_type": "edge-northbound-filter",
+        "device_id": "",
+        "type_version": "1"
+      }
+    },
+    {
+      "key": "pipeline_registration:pipeline:gateway-1",
+      "kind": "pipeline_registration",
+      "gateway_id": "gateway-1",
+      "depends_on": [
+        "model_distribution:model:gateway-1"
+      ],
+      "spec": {
+        "config": {
+          "manager_device": "nereid-inference",
+          "pipeline_id": "meter-reader-v1",
+          "resource": "PipelinesJSON"
+        },
+        "connector_type": "edge-manager-resource",
+        "device_id": "",
+        "type_version": "1"
+      }
+    },
+    {
+      "key": "rule_chain:rule",
+      "kind": "rule_chain",
+      "device_id": "meter-reading-conclusions-1",
+      "depends_on": [
+        "companion_subscription:pipeline:companion:gateway-1"
+      ],
+      "spec": {
+        "declarative": {
+          "stale_after_seconds": 300,
+          "unit": "kWh"
+        },
+        "device_id": "meter-reading-conclusions-1",
+        "graph": {
+          "nodes": [
+            {
+              "id": "rule:above-maximum",
+              "type": "declarative-filter",
+              "name": "Value above maximum",
+              "config": {
+                "all": [
+                  {
+                    "field": "value",
+                    "op": "gt",
+                    "value": 100
+                  }
+                ]
+              },
+              "position_x": 0,
+              "position_y": 160
+            },
+            {
+              "id": "rule:above-maximum:action-range-alarm",
+              "type": "create-alarm",
+              "name": "Meter range alarm",
+              "config": {
+                "alarm_type": "BUSINESS_METER_OUT_OF_RANGE",
+                "propagate": false,
+                "severity": "MAJOR"
+              },
+              "position_x": 240,
+              "position_y": 160
+            },
+            {
+              "id": "rule:below-minimum",
+              "type": "declarative-filter",
+              "name": "Value below minimum",
+              "config": {
+                "all": [
+                  {
+                    "field": "value",
+                    "op": "lt",
+                    "value": 0
+                  }
+                ]
+              },
+              "position_x": 480,
+              "position_y": 0
+            },
+            {
+              "id": "rule:below-minimum:action-range-alarm",
+              "type": "create-alarm",
+              "name": "Meter range alarm",
+              "config": {
+                "alarm_type": "BUSINESS_METER_OUT_OF_RANGE",
+                "propagate": false,
+                "severity": "MAJOR"
+              },
+              "position_x": 720,
+              "position_y": 0
+            },
+            {
+              "id": "rule:forward:northbound",
+              "type": "forward",
+              "name": "Forward Meter conclusions",
+              "config": {
+                "channel": "meter-reading.v1",
+                "fields": [
+                  "confidence",
+                  "meterId",
+                  "unit",
+                  "value"
+                ],
+                "forwarder_id": "forwarder-1"
+              },
+              "position_x": 480,
+              "position_y": 160
+            },
+            {
+              "id": "rule:low-confidence",
+              "type": "declarative-filter",
+              "name": "Low confidence",
+              "config": {
+                "all": [
+                  {
+                    "field": "confidence",
+                    "op": "lt",
+                    "value": 0.8
+                  }
+                ]
+              },
+              "position_x": 0,
+              "position_y": 0
+            },
+            {
+              "id": "rule:retry:action-retry",
+              "type": "send-command",
+              "name": "Retry capture",
+              "config": {
+                "command_name": "Capture",
+                "params": {},
+                "target_device_id": "meter-reading-command-target-1",
+                "timeout_ms": 3000
+              },
+              "position_x": 240,
+              "position_y": 0
+            }
+          ],
+          "edges": [
+            {
+              "from": "rule:above-maximum",
+              "to": "rule:above-maximum:action-range-alarm",
+              "relation": "True"
+            },
+            {
+              "from": "rule:below-minimum",
+              "to": "rule:below-minimum:action-range-alarm",
+              "relation": "True"
+            },
+            {
+              "from": "rule:low-confidence",
+              "to": "rule:retry:action-retry",
+              "relation": "True"
+            }
+          ]
+        },
+        "name": "Meter decisions"
+      }
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Dependencies for the NereidLink device simulators beyond the Python
+# standard library. Only needed for JWT (RS256/ES256 signing) devices.
+PyJWT>=2.8
+cryptography>=42.0

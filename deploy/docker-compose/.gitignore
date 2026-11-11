@@ -1,0 +1,9 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Local environment file with Let's Encrypt email and deployment overrides;
+# never commit it.
+.env
+
+# Local copy of docker-compose.local.yml.example; the example stays tracked.
+/docker-compose.local.yml

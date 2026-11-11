@@ -1,0 +1,96 @@
+{{- /*
+Copyright (C) 2026 YIQISOFT
+SPDX-License-Identifier: Apache-2.0
+
+Bundled PostgreSQL for the self-contained Kubernetes deployment. Skipped
+when postgresql.mode is "cnpg" (CloudNativePG Cluster) or "external"
+(provide your own DSN in postgresql.externalDSN).
+*/ -}}
+{{- if eq .Values.postgresql.mode "bundled" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nereidlink.fullname" . }}-postgresql
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ include "nereidlink.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: postgresql
+  ports:
+    - name: tcp-postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "nereidlink.fullname" . }}-postgresql
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+    app.kubernetes.io/component: postgresql
+spec:
+  serviceName: {{ include "nereidlink.fullname" . }}-postgresql
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "nereidlink.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: postgresql
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "nereidlink.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: postgresql
+    spec:
+      imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 8 }}
+      # The TimescaleDB/Postgres entrypoint starts as root to chmod PGDATA and
+      # /var/run/postgresql, then drops privileges to the postgres os user via
+      # gosu, so runAsUser must not be pinned. local-path (block, 0700-able)
+      # is required rather than root-squashed NFS.
+      containers:
+        - name: postgres
+          image: {{ include "nereidlink.depImage" (dict "registry" .Values.postgresql.image.registry "repository" .Values.postgresql.image.repository "tag" .Values.postgresql.image.tag) }}
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgresql.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgresql.username | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.postgresql.password | quote }}
+            # Matches the former custom image's Dockerfile ENV so the
+            # upstream timescale/timescaledb image behaves identically.
+            - name: POSTGRES_INITDB_ARGS
+              value: "--data-checksums"
+          ports:
+            - name: tcp-postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgresql.username | quote }}, "-d", {{ .Values.postgresql.database | quote }}]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+{{ toYaml .Values.postgresql.resources | indent 12 }}
+      nodeSelector:
+{{ toYaml .Values.nodeSelector | indent 8 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+{{ toYaml .Values.postgresql.accessModes | default (list "ReadWriteOnce") | indent 10 }}
+        storageClassName: {{ .Values.postgresql.storageClass }}
+        resources:
+          requests:
+            storage: {{ .Values.postgresql.size }}
+{{- end }}

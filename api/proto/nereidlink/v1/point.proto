@@ -1,0 +1,54 @@
+// Copyright (C) 2026 YIQISOFT
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package nereidlink.v1;
+
+option go_package = "github.com/nereidai/nereidlink/api/gen/nereidlink/v1;v1";
+
+// ValueType discriminates the engineering value carrier so consumers do
+// not have to guess which of v_double / v_bool / v_string is populated.
+enum ValueType {
+  // Unspecified predates type tagging and is treated as a number.
+  VALUE_TYPE_UNSPECIFIED = 0;
+  // Number carries the value in v_double.
+  VALUE_TYPE_NUMBER = 1;
+  // Boolean carries the value in v_bool.
+  VALUE_TYPE_BOOLEAN = 2;
+  // String carries the value in v_string.
+  VALUE_TYPE_STRING = 3;
+}
+
+// TelemetryPoint is the normalized payload carried inside an Envelope for
+// one measurement value. Devices may upload JSON frames; ingress decodes
+// them into this canonical representation before publishing.
+message TelemetryPoint {
+  // MeasurementKey identifies the measurement declared by DeviceProfile.
+  string measurement_key = 1;
+
+  // VDouble is the numeric engineering value.
+  double v_double = 2;
+
+  // Quality is the data quality marker (GOOD/UNCERTAIN/BAD).
+  string quality = 3;
+
+  // RawDouble is the original numeric value reported by the device.
+  double raw_double = 4;
+
+  // Unit is the engineering unit supplied by the measurement descriptor.
+  string unit = 5;
+
+  // DescriptorVersion identifies the descriptor version used for conversion.
+  uint32 descriptor_version = 6;
+
+  // VString is the engineering value of an enum or other textual result.
+  string v_string = 7;
+
+  // VBool is the engineering value of a boolean measurement such as a
+  // switch or presence flag.
+  bool v_bool = 8;
+
+  // ValueType selects which value carrier is valid for this point.
+  ValueType value_type = 9;
+}

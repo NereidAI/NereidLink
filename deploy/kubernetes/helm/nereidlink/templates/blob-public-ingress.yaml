@@ -1,0 +1,111 @@
+{{- /*
+Copyright (C) 2026 YIQISOFT
+SPDX-License-Identifier: Apache-2.0
+
+Optional public route to the (BYO) S3-compatible object store. Presigned
+download URLs embed blob.publicEndpoint, which must be reachable by
+browsers and edges outside the cluster. Kubernetes Ingress can only
+reference same-namespace Services and k3s Traefik rejects ExternalName,
+so this uses a Traefik IngressRoute that points directly at the store
+Service in its own namespace, plus a cert-manager Certificate. Traefik
+and cert-manager are therefore required when enabled. Disabled by
+default for sites whose infra owns the route.
+*/ -}}
+{{- if .Values.blob.publicIngress.enabled }}
+{{- $epParts := splitList ":" (required "blob.endpoint is required for blob.publicIngress" .Values.blob.endpoint) }}
+{{- $hostParts := splitList "." (first $epParts) }}
+{{- $svcName := .Values.blob.publicIngress.serviceName | default (first $hostParts) }}
+{{- $svcNamespace := .Values.blob.publicIngress.serviceNamespace | default (index $hostParts 1) }}
+{{- $svcPort := .Values.blob.publicIngress.servicePort | default (int (last $epParts)) }}
+{{- $ns := required "blob endpoint must be svc.namespace.svc[:port]" $svcNamespace }}
+{{- $peParts := splitList ":" (.Values.blob.publicEndpoint | default .Values.blob.endpoint) }}
+{{- $host := .Values.blob.publicIngress.host | default (first $peParts) }}
+{{- $fullName := include "nereidlink.fullname" . }}
+{{- if .Values.blob.publicIngress.clusterIssuer }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fullName }}-blob
+  namespace: {{ $ns }}
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+spec:
+  secretName: {{ $fullName }}-blob-tls
+  issuerRef:
+    name: {{ .Values.blob.publicIngress.clusterIssuer }}
+    kind: ClusterIssuer
+  dnsNames:
+    - {{ $host | quote }}
+{{- end }}
+{{- if .Values.blob.publicIngress.corsOrigin }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $fullName }}-blob-cors
+  namespace: {{ $ns }}
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+spec:
+  # In-browser text/media previews fetch() the presigned URL from the
+  # console origin; SeaweedFS S3 does not implement PutBucketCors, so the
+  # header is added at the edge. Downloads (navigation/<img>) need none.
+  headers:
+    customResponseHeaders:
+      Access-Control-Allow-Origin: {{ .Values.blob.publicIngress.corsOrigin | quote }}
+      Access-Control-Allow-Methods: "GET, HEAD, OPTIONS"
+      Access-Control-Allow-Headers: "*"
+{{- end }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ $fullName }}-blob
+  namespace: {{ $ns }}
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`{{ $host }}`)
+      kind: Rule
+      services:
+        - name: {{ $svcName }}
+          namespace: {{ $svcNamespace }}
+          port: {{ $svcPort }}
+{{- if .Values.blob.publicIngress.tls }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ $fullName }}-blob-tls
+  namespace: {{ $ns }}
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+spec:
+  entryPoints:
+    - websecure
+{{- if .Values.blob.publicIngress.corsOrigin }}
+  routes:
+    - match: Host(`{{ $host }}`)
+      kind: Rule
+      middlewares:
+        - name: {{ $fullName }}-blob-cors
+      services:
+        - name: {{ $svcName }}
+          namespace: {{ $svcNamespace }}
+          port: {{ $svcPort }}
+{{- else }}
+  routes:
+    - match: Host(`{{ $host }}`)
+      kind: Rule
+      services:
+        - name: {{ $svcName }}
+          namespace: {{ $svcNamespace }}
+          port: {{ $svcPort }}
+{{- end }}
+  tls:
+    secretName: {{ $fullName }}-blob-tls
+{{- end }}
+{{- end }}

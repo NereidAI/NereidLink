@@ -1,0 +1,158 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Reference business template pack (single-template document).
+# Import through POST /v1/tenants/{tenant}/business-templates/import
+# or `nereidlink templates import -f <file>`. The running NL binary
+# ships no business vocabulary of its own.
+
+schema_version: nereidlink.business-template/v1
+id: meter-reading
+version: 1.0.0
+name: Meter reading
+description: Business assembly for meter conclusions, retries, alarms, and selective egress
+requires:
+    companion: meter-service
+    model: meter-model
+parameters:
+    additionalProperties: false
+    properties:
+        low_confidence_threshold:
+            default: 0.8
+            maximum: 1
+            minimum: 0
+            type: number
+        max_value:
+            type: number
+        min_value:
+            type: number
+        retry_command:
+            default: Capture
+            minLength: 1
+            type: string
+        stale_after_seconds:
+            default: 300
+            minimum: 1
+            type: integer
+        unit:
+            minLength: 1
+            type: string
+    required:
+        - min_value
+        - max_value
+        - unit
+    type: object
+assembly:
+    nodes:
+        - id: camera
+          kind: camera
+          name: Camera
+          ref: camera
+          asset: {}
+          position:
+            x: 0
+            "y": 160
+        - id: pipeline
+          kind: pipeline
+          name: Meter reader
+          ref: meter-reader-v1
+          asset: {}
+          position:
+            x: 240
+            "y": 160
+        - id: model
+          kind: model
+          name: Meter model
+          ref: meter-model
+          asset: {}
+          position:
+            x: 240
+            "y": 0
+        - id: companion
+          kind: companion
+          name: Meter service
+          ref: meter-service
+          asset: {}
+          position:
+            x: 480
+            "y": 160
+        - id: rule
+          kind: rule
+          name: Meter decisions
+          ref: meter-rules
+          asset: {}
+          position:
+            x: 720
+            "y": 160
+        - id: action-retry
+          kind: action
+          name: Retry capture
+          ref: meter-capture-command
+          asset:
+            action_type: send-command
+            command_name: Capture
+            resource: Capture
+          position:
+            x: 960
+            "y": 40
+        - id: action-range-alarm
+          kind: action
+          name: Meter range alarm
+          ref: meter-range-alarm
+          asset:
+            action_type: create-alarm
+            alarm_type: BUSINESS_METER_OUT_OF_RANGE
+            severity: MAJOR
+          position:
+            x: 960
+            "y": 200
+        - id: northbound
+          kind: northbound
+          name: Meter conclusions
+          ref: meter-egress
+          asset:
+            channel: meter-reading.v1
+            edgex_device_name: meter-reading-edgex-conclusions
+            edgex_profile_name: meter-reading-conclusion-profile
+            edgex_resource_names:
+                - confidence
+                - meterId
+                - unit
+                - value
+            readings:
+                - confidence
+                - meterId
+                - unit
+                - value
+          position:
+            x: 960
+            "y": 360
+    edges:
+        - id: camera-pipeline
+          source: camera
+          target: pipeline
+          relation: frames
+        - id: companion-rule
+          source: companion
+          target: rule
+          relation: conclusions
+        - id: model-pipeline
+          source: model
+          target: pipeline
+          relation: uses
+        - id: pipeline-companion
+          source: pipeline
+          target: companion
+          relation: facts
+        - id: rule-northbound
+          source: rule
+          target: northbound
+          relation: publishes
+        - id: rule-range-alarm
+          source: rule
+          target: action-range-alarm
+          relation: triggers
+        - id: rule-retry
+          source: rule
+          target: action-retry
+          relation: triggers

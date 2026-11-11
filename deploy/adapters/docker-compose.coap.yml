@@ -1,0 +1,23 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Compose file for the CoAP southbound module. It attaches to the same
+# dev network as postgres and nats so the adapter can enroll against the
+# platform, stream uplinks through NATS JetStream and query the registry.
+# Usage:
+#   docker compose -f docker-compose.dev.yml \
+#       -f deploy/adapters/docker-compose.coap.yml up -d coap
+
+services:
+  coap:
+    image: nereidlink/coap:${NL_VERSION:-0.0.0-dev}
+    profiles: ["coap"]
+    command: ["-c", "/etc/nereidlink/coap.yaml"]
+    ports:
+      - "5683:5683/udp"
+    volumes:
+      - configs/adapters/coap.example.yaml:/etc/nereidlink/coap.yaml:ro
+    depends_on:
+      - nats
+      - postgres
+    restart: unless-stopped

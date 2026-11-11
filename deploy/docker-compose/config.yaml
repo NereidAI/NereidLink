@@ -1,0 +1,198 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Runtime configuration for the single-host Docker Compose deployment.
+#
+# The platform does not expand environment variables inside this YAML, so all
+# service hostnames and credentials are written literally here. This file
+# contains the PostgreSQL DSN and is therefore bind-mounted read-only and
+# should be treated as a secret on the host.
+#
+# Hostnames "postgres" and "nats" resolve through the user-defined network
+# Compose creates for this project. Blob (S3) features are intentionally
+# omitted; only external-URL OTA is available in this stack.
+
+server:
+  http_listen: "0.0.0.0:8080"
+  ws_path: "/ws"
+  ws_read_limit: 65536
+  ws_ping_interval: "30s"
+  shutdown_timeout: "30s"
+
+registry:
+  listen: "0.0.0.0:19090"
+  module_token: "compose-module-token"
+
+presence:
+  ingress_id: "ingress-compose-1"
+  heartbeat_interval: "15s"
+  lease_ttl: "45s"
+  offline_batch_size: 1000
+  offline_batch_interval: "100ms"
+  persist_buffer_size: 4096
+
+# Edge manifest reconciliation: the lease must span several missed five-minute
+# cycles before sub-devices are derived offline.
+manifest:
+  lease_ttl: "16m"
+  sweep_interval: "1m"
+
+link_health:
+  heartbeat_interval: "30s"
+  suspect_after: "45s"
+  down_after: "90s"
+  sweep_interval: "10s"
+  flap_window: "10m"
+  flap_threshold: 5
+
+link_notify:
+  escalation_after: "30m"
+  escalation_sweep_interval: "1m"
+  digest_enabled: true
+  digest_hour_utc: 8
+  digest_sweep_interval: "1m"
+
+connector:
+  pending_after: "5m"
+  failed_escalation_after: "1h"
+  sweep_interval: "1m"
+
+auto_provision:
+  enabled: false
+  max_per_cycle: 100
+  max_candidates: 1000
+  default_profile: ""
+
+probe:
+  max_devices: 100
+  create_rate: "1s"
+  max_concurrent: 5
+  cooldown: "10s"
+  default_timeout: "10s"
+  task_deadline: "60s"
+  retention: "24h"
+  sweep_interval: "1m"
+
+nats:
+  url: "nats://nats:4222"
+
+bus:
+  compression:
+    level: "balanced"
+    min_bytes: 0
+
+ingest_limit:
+  per_device_rate: 100
+  per_device_burst: 100
+  sweep_interval: "1m"
+  idle: "10m"
+  # ADR-0014 flood alarm; 0 disables.
+  flood_threshold: 0
+  flood_window: "10s"
+  flood_recover: "2m"
+
+# ADR-0014 online-but-silent detection; off unless enabled.
+silence_detection:
+  enabled: false
+  sweep_interval: "60s"
+
+retention:
+  sweep_interval: "24h"
+
+postgres:
+  dsn: "postgres://nereidlink:nereidlink@postgres:5432/nereidlink?sslmode=disable"
+
+# MQTTS (8883) is terminated by NereidLink itself with the server certificate
+# on the persistent state volume; the leaf is re-signed on each start so its
+# SANs track the --hosts list in docker-compose.yml without rotating the
+# device CA.
+ingest_mqtt:
+  listen: "0.0.0.0:1883"
+  tls_listen: "0.0.0.0:8883"
+  tls_cert_file: "/var/lib/nereidlink/pki/server.pem"
+  tls_key_file: "/var/lib/nereidlink/pki/server-key.pem"
+  tls_client_ca_file: "/var/lib/nereidlink/pki/ca.pem"
+  tls_require_client_cert: false
+
+ingest_http:
+  ingress_id: "ingress-compose-1-http"
+  long_poll_wait: "25s"
+  session_ttl: "90s"
+  sweep_interval: "15s"
+  mailbox_size: 16
+  max_telemetry_bytes: 65536
+
+telemetry:
+  flush_interval: "500ms"
+  flush_size: 1000
+  max_ack_pending: 10000
+  dedup_window: 100000
+
+command:
+  default_timeout: "30s"
+  persistent_ttl: "24h"
+  delivery_timeout: "5s"
+  sweep_interval: "5s"
+  claim_batch_size: 100
+  max_body_bytes: 65536
+  max_batch_targets: 1000
+
+notify:
+  frequency_window: "5m"
+  smtp:
+    enabled: false
+  critical_workers: 4
+  workers: 4
+  delivery_timeout: "5s"
+
+deadman:
+  enabled: false
+  smtp:
+    enabled: false
+  email_recipients: []
+  interval: "15s"
+  threshold: 3
+  timeout: "5s"
+
+accounting:
+  enabled: true
+  node_id: "compose-node-1"
+  sample_rate: 10
+  capacity: 256
+  report_interval: "30s"
+  top_n: 20
+
+rules:
+  max_ack_pending: 10000
+  reload_interval: "3s"
+  script_timeout: "1s"
+
+seed:
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  device_id: "00000000-0000-0000-0000-000000000100"
+  device_token: "seed-device-token"
+
+module:
+  heartbeat_lease: "30s"
+  sweep_interval: "10s"
+
+provision:
+  poll_interval: "5s"
+  lease: "2m"
+  max_attempts: 10
+  min_backoff: "2s"
+  max_backoff: "5m"
+
+identity:
+  jwt_secret: "compose-only-change-me-0123456789abcdef"
+  access_ttl: "30m"
+  refresh_ttl: "168h"
+
+license:
+  public_key_path: "/etc/nereidlink/license/public.pem"
+  grace_period: "168h"
+  clock_file: "/var/lib/nereidlink/license-clock"
+
+ops_admin:
+  listen: "127.0.0.1:19190"
+  shutdown_timeout: "10s"

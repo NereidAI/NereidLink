@@ -1,0 +1,49 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Highly available NereidLink topology:
+#   - 2 all-in-one app pods with NATS-KV leader election for the exclusive
+#     background roles (telemetry/commands/PKI reads stay active on all pods)
+#   - CloudNativePG PostgreSQL, 3 instances with automatic primary failover
+#     (requires the cnpg operator installed cluster-wide)
+#   - 3-node NATS JetStream Raft cluster, node-local storage per pod
+#   - app state (PKI, KEK, license clock) on one NFS RWX volume shared by
+#     all app pods; firmware/media blobs live in S3, not on the volume
+#
+# Usage:
+#   helm install nereidlink ./nereidlink -n nereidlink --create-namespace \
+#     -f examples/ha.yaml
+# Node ports 31883/31884 and the ingress host must be free (remove the old
+# single-node release first). Requires >=3 worker nodes for full failure
+# domains; with 2 nodes replicas stack and a node outage loses one vote.
+
+replicaCount: 2
+
+cluster:
+  enabled: true
+  leaseTTL: "15s"
+
+persistence:
+  # RWX so both app pods see the same PKI/KEK/license-clock directory.
+  storageClass: nfs-csi
+  accessModes:
+    - ReadWriteMany
+
+postgresql:
+  mode: cnpg
+  cnpg:
+    instances: 3
+
+nats:
+  replicas: 3
+  jetstreamReplicas: 3
+
+# Required: S3-compatible object store shared by both app pods. The RWX
+# volume holds PKI/KEK/license-clock only; blobs must not be local files.
+blob:
+  endpoint: "CHANGE_ME_s3_internal_host:port"
+  publicEndpoint: "CHANGE_ME_s3_public_host:port"
+  bucket: "nereidlink"
+  accessKey: "CHANGE_ME"
+  secretKey: "CHANGE_ME"
+  secure: false

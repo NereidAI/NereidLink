@@ -1,0 +1,31 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+# Example configuration for the CoAP southbound module. Copy to
+# coap.yaml and fill the enrollment token returned by the management API
+# when provisioning the module.
+
+# Core platform endpoints.
+core:
+  # NATS URL used for JetStream uplink and command dispatch.
+  nats_url: "nats://core:4222"
+  # Registry gRPC endpoint for device authentication.
+  registry_grpc: "core:19090"
+  # Shared module token required by the registry gRPC endpoint.
+  registry_token: "dev-module-token"
+  # Management REST base for enrollment and heartbeat.
+  management_url: "http://core:8080"
+
+# Enrollment of this module.
+module:
+  enrollment_token: "<token-from-provisioning>"
+  heartbeat_interval: "10s"
+
+# CoAP listener settings.
+coap:
+  # Plain UDP listener (debug/internal networks).
+  listen: ":5683"
+  # DTLS listener with PSK authentication. Empty disables DTLS.
+  dtls_listen: ":5684"
+  # Allowed CoAP origins for cross-protocol web clients, if any.
+  allowed_origins: []

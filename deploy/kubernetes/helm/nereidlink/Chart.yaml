@@ -1,0 +1,23 @@
+# Copyright (C) 2026 YIQISOFT
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v2
+# Helm/Rancher require the release name to match ^[a-z0-9]...$, and
+# `helm install --generate-name` derives it from this name, so it must stay
+# lower case (an upper-camel chart name makes Rancher catalog installs fail).
+name: nereidlink
+description: |
+  NereidLink IoT connection platform for Kubernetes/K3s, deployed as a
+  split frontend/backend topology: a stateful backend process (HTTP/WS API,
+  MQTT listener, migrations) plus a stateless nginx frontend serving the
+  built console, with path-based splitting at the Ingress. The chart
+  provisions a bundled PostgreSQL and a JetStream-enabled NATS, stores blobs
+  in a required S3-compatible object store, renders non-secret configuration
+  as a ConfigMap with a Secret overlay, runs schema migrations through an
+  init container, and exposes the HTTP/WS API and the MQTT listener.
+type: application
+# Chart package version is bumped independently at release packaging time.
+# appVersion is the rolling-dev placeholder on the branch; a tag release
+# injects the bare SemVer (0.0.1) via `helm package --app-version`.
+version: "0.0.1"
+appVersion: "0.0.0-dev"

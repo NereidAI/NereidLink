@@ -1,0 +1,26 @@
+{{- /*
+Copyright (C) 2026 YIQISOFT
+SPDX-License-Identifier: Apache-2.0
+
+Service for the backend pod. HTTP serves the REST API, Swagger UI and the
+WebSocket upgrade; the SPA is served by the separate frontend Service.
+MQTT is exposed in-cluster (external TCP ingress is a later slice).
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nereidlink.fullname" . }}
+  labels:
+{{ include "nereidlink.labels" . | indent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+{{ include "nereidlink.selectorLabels" . | indent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.httpPort }}
+      targetPort: http
+    - name: mqtt
+      port: {{ .Values.service.mqttPort }}
+      targetPort: mqtt
