@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/coder/websocket v1.8.15
-	github.com/coreos/go-oidc/v3 v3.11.0
+	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/dgraph-io/ristretto v0.1.1
 	github.com/dop251/goja v0.0.0-20260926152631-39ec2650adc9
 	github.com/eclipse/paho.mqtt.golang v1.5.1
