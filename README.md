@@ -183,13 +183,14 @@ modes, upgrades, MQTT access, license import and troubleshooting:
 Complete NereidForge first: NereidLink requires Forge SeaweedFS and its exact
 S3 credentials from the first installation. The public OCI chart provisions
 the backend and frontend Deployments, bundled PostgreSQL/TimescaleDB and NATS,
-Ingress path splitting and the MQTT NodePort services. The immutable Lab/POC
-version below passed anonymous chart pull/render and backend/frontend
-image-manifest verification on 2026-11-22. Use a verified formal version
-instead when one is published; floating `0.0.0-dev` is not reproducible.
+Ingress path splitting and the MQTT NodePort services. The floating
+`0.0.0-dev` OCI tag aliases the latest successfully published immutable
+`0.0.0-dev-<short-sha>` chart manifest, whose `appVersion` selects both matching
+immutable application images. Use a verified formal version instead when one is
+published.
 
 ```bash
-export NEREIDLINK_VERSION=0.0.0-dev-6da29bd
+export NEREIDLINK_VERSION=0.0.0-dev
 export DEPLOYMENT_ROOT="${DEPLOYMENT_ROOT:-$HOME/.nereidai-deployment}"
 install -d -m 700 "$DEPLOYMENT_ROOT/deploy-values/nereidlink"
 test -s "$DEPLOYMENT_ROOT/deploy-values/nereidlink/values.yaml" || \
@@ -208,8 +209,11 @@ kubectl -n nereidlink rollout status deploy/nereidlink --timeout=240s
 kubectl -n nereidlink rollout status deploy/nereidlink-frontend --timeout=240s
 ```
 
-The chart selects both suite images at the same immutable version through its
-`appVersion`. Complete the one-time administrator bootstrap in the web UI and
+Record the OCI digest and resolved chart version for each deployment. For
+deliberate reproduction, replace `NEREIDLINK_VERSION` with the resolved
+`0.0.0-dev-<short-sha>` snapshot instead of the floating selector. The chart
+selects both suite images at that immutable `appVersion`. Complete the one-time
+administrator bootstrap in the web UI and
 import site license material through the supported product interface; no
 vendor private key is part of chart installation. Chart values, external
 infrastructure, HA topology and SSO/license operation are detailed in
