@@ -66,9 +66,19 @@ jobs:
         GIT_SHA=${{ github.sha }}
         BUILD_DATE=${{ needs.prep.outputs.build_date }}
 
+  release-chart:
+    name: Publish Helm chart
+    needs: [release-backend, release-frontend]
+    uses: NereidAI/.github/.github/workflows/publish-chart.yml@v1
+    with:
+      chart-path: deploy/kubernetes/helm/nereidlink
+      chart-name: nereidlink
+      channel: release
+      values-files: deploy/kubernetes/helm/nereidlink/examples/byo-infra.yaml
+
   github-release:
     name: Create GitHub Release entry
-    needs: [release-backend, release-frontend]
+    needs: [release-backend, release-frontend, release-chart]
     runs-on: ubuntu-latest
     permissions:
       contents: write

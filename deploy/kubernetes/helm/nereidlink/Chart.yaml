@@ -16,8 +16,7 @@ description: |
   as a ConfigMap with a Secret overlay, runs schema migrations through an
   init container, and exposes the HTTP/WS API and the MQTT listener.
 type: application
-# Chart package version is bumped independently at release packaging time.
-# appVersion is the rolling-dev placeholder on the branch; a tag release
-# injects the bare SemVer (0.0.1) via `helm package --app-version`.
-version: "0.0.1"
+# Tracked sources stay on the rolling-dev placeholder. Release and immutable
+# development packages inject both versions via helm package.
+version: "0.0.0-dev"
 appVersion: "0.0.0-dev"
