@@ -180,20 +180,39 @@ modes, upgrades, MQTT access, license import and troubleshooting:
 
 ### 3. Kubernetes / K3s
 
-The Helm chart under `deploy/kubernetes/helm/nereidlink/` provisions the
-backend and frontend Deployments, bundled PostgreSQL/TimescaleDB and NATS,
-Ingress path splitting and the MQTT NodePort services:
+Complete NereidForge first: NereidLink requires Forge SeaweedFS and its exact
+S3 credentials from the first installation. The public OCI chart provisions
+the backend and frontend Deployments, bundled PostgreSQL/TimescaleDB and NATS,
+Ingress path splitting and the MQTT NodePort services. The immutable Lab/POC
+version below passed anonymous chart pull/render and backend/frontend
+image-manifest verification on 2026-11-22. Use a verified formal version
+instead when one is published; floating `0.0.0-dev` is not reproducible.
 
 ```bash
-deploy/kubernetes/scripts/deploy.sh upgrade   # install/upgrade plus first-run bootstrap
-deploy/kubernetes/scripts/smoke.sh            # readiness, healthz, captcha and SPA probes
+export NEREIDLINK_VERSION=0.0.0-dev-6da29bd
+export DEPLOYMENT_ROOT="${DEPLOYMENT_ROOT:-$HOME/.nereidai-deployment}"
+install -d -m 700 "$DEPLOYMENT_ROOT/deploy-values/nereidlink"
+test -s "$DEPLOYMENT_ROOT/deploy-values/nereidlink/values.yaml" || \
+  helm show values oci://ghcr.io/nereidai/charts/nereidlink \
+    --version "$NEREIDLINK_VERSION" \
+    > "$DEPLOYMENT_ROOT/deploy-values/nereidlink/values.yaml"
+chmod 600 "$DEPLOYMENT_ROOT/deploy-values/nereidlink/values.yaml"
+# Set strong postgresql/auth secrets, the site Ingress, SSO, and the Forge
+# SeaweedFS blob.endpoint/accessKey/secretKey before installing.
+helm upgrade --install nereidlink \
+  oci://ghcr.io/nereidai/charts/nereidlink \
+  --version "$NEREIDLINK_VERSION" \
+  --namespace nereidlink --create-namespace --timeout 8m \
+  --values "$DEPLOYMENT_ROOT/deploy-values/nereidlink/values.yaml"
+kubectl -n nereidlink rollout status deploy/nereidlink --timeout=240s
+kubectl -n nereidlink rollout status deploy/nereidlink-frontend --timeout=240s
 ```
 
-Deployment architectures, namespaces and the two delivery forms are explained
-in the suite documentation: [Kubernetes &
-Helm](https://nereidai.github.io/latest/deployment/kubernetes/) and
-[Air-Gapped Installation](https://nereidai.github.io/latest/deployment/air-gapped/).
-Chart values, BYO infrastructure, HA topology and SSO/license operation:
+The chart selects both suite images at the same immutable version through its
+`appVersion`. Complete the one-time administrator bootstrap in the web UI and
+import site license material through the supported product interface; no
+vendor private key is part of chart installation. Chart values, external
+infrastructure, HA topology and SSO/license operation are detailed in
 [`deploy/README.md`](deploy/README.md).
 
 ### First login and persistent state
