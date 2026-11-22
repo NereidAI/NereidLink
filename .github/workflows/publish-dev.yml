@@ -55,3 +55,13 @@ jobs:
       build-args: |
         GIT_SHA=${{ github.sha }}
         BUILD_DATE=${{ needs.prep.outputs.build_date }}
+
+  publish-dev-chart:
+    name: Publish dev Helm charts
+    needs: [publish-dev-backend, publish-dev-frontend]
+    uses: NereidAI/.github/.github/workflows/publish-chart.yml@v1
+    with:
+      chart-path: deploy/kubernetes/helm/nereidlink
+      chart-name: nereidlink
+      channel: development
+      values-files: deploy/kubernetes/helm/nereidlink/examples/byo-infra.yaml
