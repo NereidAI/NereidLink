@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/coreos/go-oidc/v3 v3.11.0
-	github.com/dgraph-io/ristretto v0.1.1
+	github.com/dgraph-io/ristretto v0.2.0
 	github.com/dop251/goja v0.0.0-20260926152631-39ec2650adc9
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/golang-migrate/migrate/v4 v4.20.1
@@ -40,7 +40,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
-	github.com/golang/glog v1.2.5 // indirect
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
