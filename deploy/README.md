@@ -165,11 +165,15 @@ uses the reserved placeholder `nereidlink.example.com` by default. Override
 `ingress.host` with your public DNS name and add its DNS record (the cluster
 wildcard is not an automatic wildcard). It splits traffic by path: `/v1`, the
 configured `wsPath`
-(`/ws`), `/api`, `/metrics`, `/healthz` and `/auth` (the NS SSO callback)
-go to the backend Service, while `/` goes to the stateless `frontend`
-Deployment/Service (nginx, default 2 replicas, no PVC, no arch pin). The
-frontend image never proxies to the backend; every new non-`/v1` backend
-HTTP route must be added to the Ingress path table in the same change.
+(`/ws`), `/api`, `/metrics`, `/healthz` and — only when `sso.enabled` — the
+exact `sso.callbackPath` (default `/auth/ns-callback`, `Exact` match) go to
+the backend Service, while `/` goes to the stateless `frontend`
+Deployment/Service (nginx, default 2 replicas, no PVC, no arch pin). All
+other `/auth/*` URLs, including the SPA route `/auth/callback` that the
+backend redirects to after a successful SSO ticket exchange, stay on the
+frontend. The frontend image never proxies to the backend; every new
+non-`/v1` backend HTTP route must be added to the Ingress path table in the
+same change.
 
 Raw MQTT is not HTTP and therefore cannot use the HTTP Ingress. The chart
 creates a separate **NodePort** service `nereidlink-mqtt`:
