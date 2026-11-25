@@ -85,6 +85,11 @@ type Hub struct {
 	nc   *nats.Conn
 	tune Tuning
 
+	// webHandler serves the embedded SPA when the binary carries a complete
+	// web/dist embed. It stays nil in the split backend container, where the
+	// nginx frontend image owns browser traffic; serveWeb then returns 404.
+	webHandler http.Handler
+
 	// commands dispatches device commands for the REST use.
 	commands CommandSender
 

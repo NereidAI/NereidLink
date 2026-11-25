@@ -113,6 +113,7 @@ import (
 	"github.com/nereidai/nereidlink/sdk/profile"
 	sdkregistry "github.com/nereidai/nereidlink/sdk/registry"
 	"github.com/nereidai/nereidlink/sdk/scriptruntime"
+	webassets "github.com/nereidai/nereidlink/web"
 )
 
 // blobBackend is the union of blob capabilities consumed by the wiring:
@@ -418,6 +419,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		ReadLimit:    cfg.Server.WSReadLimit,
 		PingInterval: mustDuration(cfg.Server.WSPingInterval),
 	})
+	// Validate the embedded SPA once at startup. The standalone binary embeds
+	// a complete web/dist; the split backend container intentionally embeds
+	// only the .gitkeep placeholder and serves the console from the separate
+	// frontend image, so an incomplete embed is non-fatal: log and keep the
+	// API running, and serveWeb answers 404 until a real embed is configured.
+	webFS, err := webassets.DistFS()
+	if err != nil {
+		slog.Warn("embedded web assets incomplete; running API-only, browser traffic must use the frontend image",
+			"error", err)
+	} else {
+		hub.ConfigureWebAssets(webFS)
+	}
 	// In cluster mode the login captcha must verify on any replica: the
 	// in-process default would reject every challenge issued by a peer
 	// (CAPTCHA_INVALID). Share it through NATS KV like the OIDC state.

@@ -3,7 +3,9 @@
 
 // web_assets.go mounts the embedded production frontend into the gateway-api
 // HTTP mux. It implements SPA history-mode fallback while preserving real
-// 404 responses for missing hashed asset files.
+// 404 responses for missing hashed asset files. Directory URLs and build-only
+// files (dotfiles, source maps) are rejected so the server can never emit an
+// http.FileServer autoindex page.
 
 package gatewayapi
 
@@ -16,10 +18,16 @@ import (
 	webassets "github.com/nereidai/nereidlink/web"
 )
 
-// assetsDir is the embedded Vite output subdirectory served by this handler.
-const assetsDir = "dist"
+// ConfigureWebAssets installs the validated embedded SPA filesystem. main
+// calls it once at startup after webassets.DistFS succeeds; hubs in the
+// split backend container (embed holds only .gitkeep) stay unconfigured and
+// serveWeb answers 404, because the nginx frontend image owns the console.
+func (h *Hub) ConfigureWebAssets(assets fs.FS) {
+	h.webHandler = newWebHandler(assets)
+}
 
-// serveWeb serves the embedded single-page application.
+// newWebHandler builds the SPA handler around an injectable asset filesystem
+// so the routing rules can be tested against synthetic embedded layouts.
 //
 // Resolution rules:
 //
@@ -29,46 +37,69 @@ const assetsDir = "dist"
 //     fall back to index.html so the React router can render them.
 //   - Unknown paths that look like static assets (an extension is present)
 //     return 404 instead of silently returning HTML under an asset URL.
-func (h *Hub) serveWeb(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+//   - Directory URLs, dotfiles/underscore entries and *.map files always
+//     return 404; no directory listing is ever produced.
+func newWebHandler(assets fs.FS) http.Handler {
+	fileServer := http.FileServerFS(assets)
 
-	// Clean the request path before touching the embedded filesystem to
-	// prevent path traversal via segments such as "/../".
-	clean := path.Clean(r.URL.Path)
-	if !strings.HasPrefix(clean, "/") {
-		clean = "/" + clean
-	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
 
-	assets, err := fs.Sub(webassets.Dist, assetsDir)
-	if err != nil {
-		// This can only fail when the embedded tree layout changes; it is a
-		// build-time defect rather than a client error.
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
+		// Clean the request path before touching the embedded filesystem to
+		// prevent path traversal via segments such as "/../".
+		clean := path.Clean(r.URL.Path)
+		if !strings.HasPrefix(clean, "/") {
+			clean = "/" + clean
+		}
 
-	relative := strings.TrimPrefix(clean, "/")
-	if relative == "" {
-		relative = "index.html"
-	}
+		relative := strings.TrimPrefix(clean, "/")
+		if relative == "" {
+			relative = "index.html"
+		}
 
-	if _, statErr := fs.Stat(assets, relative); statErr != nil {
-		if !looksLikeAsset(relative) {
-			// Client-side route: let the file server serve the directory,
-			// which returns index.html. Requesting "/index.html" directly
-			// would make net/http issue a 301 redirect to "./".
-			r.URL.Path = "/"
-		} else {
-			// Missing static asset: do not masquerade as HTML.
+		// Build-only files (.gitkeep, source maps, underscore tooling) must
+		// never reach the SPA fallback: answer like a deleted resource.
+		if webassets.IsForbiddenAsset(relative) {
 			http.NotFound(w, r)
 			return
 		}
-	}
 
-	http.FileServerFS(assets).ServeHTTP(w, r)
+		info, statErr := fs.Stat(assets, relative)
+		switch {
+		case statErr == nil && info.IsDir():
+			// A directory URL (for example /assets/) must never render an
+			// autoindex page; the SPA has no browseable directories.
+			http.NotFound(w, r)
+			return
+		case statErr != nil && looksLikeAsset(relative):
+			// Missing static asset: do not masquerade as HTML.
+			http.NotFound(w, r)
+			return
+		case statErr != nil:
+			// Client-side route: let the file server serve index.html via
+			// the root path. Requesting "/index.html" directly would make
+			// net/http issue a 301 redirect to "./".
+			r.URL.Path = "/"
+		}
+
+		fileServer.ServeHTTP(w, r)
+	})
+}
+
+// serveWeb serves the embedded single-page application when the standalone
+// binary carries a complete embed. A hub without configured web assets (the
+// split backend container) returns 404: in that topology browser traffic is
+// routed to the separate frontend image, so reaching this handler means the
+// request was misrouted and must never produce a directory listing.
+func (h *Hub) serveWeb(w http.ResponseWriter, r *http.Request) {
+	if h.webHandler == nil {
+		http.NotFound(w, r)
+		return
+	}
+	h.webHandler.ServeHTTP(w, r)
 }
 
 // looksLikeAsset reports whether a request path refers to a static file
