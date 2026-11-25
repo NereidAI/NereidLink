@@ -6,8 +6,10 @@ HTTP/WS ingress with path-based frontend/backend splitting. Traefik
 performs the TLS edge (certificate issued by the internal-ca cluster
 issuer); the WebSocket upgrade on the configured ws path is handled by the
 same backend route because HTTP Upgrade is connection-scoped. Every
-non-/v1 backend HTTP route must be added to the backend prefixes below;
-everything else is the SPA and goes to the frontend nginx Service.
+non-/v1 backend HTTP route must be added to the backend path table below;
+everything else is the SPA and goes to the frontend nginx Service. Browser
+callback routes (the SPA's /auth/callback included) belong to that catch-all
+rule, so the SSO entry is an Exact match rather than an /auth Prefix.
 */ -}}
 {{- if .Values.ingress.enabled }}
 apiVersion: networking.k8s.io/v1
@@ -70,15 +72,24 @@ spec:
                 name: {{ include "nereidlink.fullname" . }}
                 port:
                   number: {{ .Values.service.httpPort }}
-          # ---- backend: the NS SSO browser callback (default /auth/ns-callback),
-          # the only browser-facing backend route outside /v1 ----
-          - path: /auth
-            pathType: Prefix
+          {{- if .Values.sso.enabled }}
+          # ---- backend: the NS SSO browser callback only. This must stay an
+          # Exact match on sso.callbackPath: every other /auth/* URL, notably
+          # the SPA route /auth/callback that handleSSOTicket redirects to
+          # after ticket verification, is browser traffic and must fall
+          # through to the "/" frontend rule below. A broad /auth Prefix used
+          # to deliver /auth/callback to the split-topology backend, whose
+          # Go embed holds only the dist/.gitkeep placeholder, so the
+          # FileServer answered with a directory autoindex instead of the
+          # console. ----
+          - path: {{ .Values.sso.callbackPath | quote }}
+            pathType: Exact
             backend:
               service:
                 name: {{ include "nereidlink.fullname" . }}
                 port:
                   number: {{ .Values.service.httpPort }}
+          {{- end }}
           # ---- frontend: SPA index, hashed assets and client-side routes ----
           - path: /
             pathType: Prefix

@@ -28,8 +28,9 @@ image:
 # Static console tier (frontend/backend split). The frontend image is an
 # nginx container serving the built Vite assets; it holds no state and can
 # scale and schedule independently of the backend. The Ingress routes only
-# browser paths ("/") here; /v1, /ws, /api, /metrics, /healthz and /auth go
-# to the backend Service.
+# browser paths ("/") here; /v1, /ws, /api, /metrics, /healthz and, when SSO
+# is enabled, the exact sso.callbackPath go to the backend Service, while
+# every other /auth/* URL (including the SPA's /auth/callback) stays here.
 frontend:
   replicaCount: 2
   image:

@@ -46,7 +46,7 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 
 | Host port | Container | Mode | Purpose |
 |-----------|-----------|------|---------|
-| 127.0.0.1:18080 | nereidlink:8080 | A | Backend HTTP/WS (`/v1`, `/ws`, `/api`, `/metrics`, `/healthz`, `/auth`), reached by host nginx only |
+| 127.0.0.1:18080 | nereidlink:8080 | A | Backend HTTP/WS (`/v1`, `/ws`, `/api`, `/metrics`, `/healthz`, exact `/auth/ns-callback`), reached by host nginx only |
 | 127.0.0.1:18081 | frontend:80 | A | Static console (SPA), reached by host nginx only |
 | 10080 | nginx:80 | B | HTTP, ACME challenge, redirect to HTTPS |
 | 10443 | nginx:443 | B | HTTPS + WebSocket (`wss://`), split to backend/frontend |
@@ -117,8 +117,23 @@ server {
     listen [::]:80;
     server_name nereidlink.example.com;
 
-    # REST API, WebSocket, Swagger, metrics, health, SSO callback.
-    location ~ ^/(v1|ws|api|metrics|healthz|auth)(/|$) {
+    # REST API, WebSocket, Swagger, metrics and health probes.
+    location ~ ^/(v1|ws|api|metrics|healthz)(/|$) {
+        proxy_pass http://127.0.0.1:18080;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        "upgrade";
+        proxy_read_timeout 3600s;
+    }
+
+    # NS SSO callback only (the default sso.callback_path). Every other
+    # /auth/* URL, including the SPA's /auth/callback, is console traffic
+    # and falls through to the 18081 frontend location below.
+    location = /auth/ns-callback {
         proxy_pass http://127.0.0.1:18080;
         proxy_http_version 1.1;
         proxy_set_header Host              $host;
