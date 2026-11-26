@@ -14,8 +14,14 @@ the operator, and imported at runtime.
 
 | Key | Held by | Committed? | Mounted into the server? |
 |-----|---------|-----------|--------------------------|
-| Ed25519 private key (`vendor-ed25519.pem`) | Vendor, offline | **No** (outside Git) | Never |
+| Ed25519 private key (`vendor-ed25519.pem`) | Vendor, offline | **No** (outside Git) | Never — no image, no Kubernetes Secret, no bind mount |
 | Ed25519 public key (`public.pem`) | Distributed trust anchor | Yes (`configs/license/public.pem`) | Baked in, or mounted as a Secret |
+
+The server only verifies signatures and has no private-key configuration
+field. A private key placed in a Kubernetes Secret provides no functionality;
+if one ever reaches etcd or a container filesystem, treat it as compromised,
+rotate the key pair and re-sign every license. Only `BEGIN PUBLIC KEY`
+material may be supplied under `license.existingSecret`.
 
 Keep the private key under the central, mode-0700 deployment-values directory.
 Generate a key once and protect it without replacing an existing key:
@@ -89,25 +95,39 @@ field ordering:
 
 ## Installing
 
-For Kubernetes, prefer the idempotent standard entry point:
+Installation is environment-specific; this tool only produces the envelope.
+The environment guides carry the full ordered runbooks:
 
-```bash
-deploy/kubernetes/scripts/deploy.sh post-deploy
-```
+- **Kubernetes:** see "License" in `deploy/README.md` — fresh key pair,
+  public-key Secret + `helm upgrade`, binding verification, envelope import
+  (console preferred), and CLI/UI confirmation. Prefer the idempotent
+  `deploy/kubernetes/scripts/deploy.sh post-deploy` for automation; it checks
+  `nereidlink license status` and only generates/installs a default license
+  when none exists, preserving any operator-installed license on reruns.
+- **Docker Compose:** see "License" in `deploy/docker-compose/README.md` —
+  the public key is bind-mounted from `configs/license/public.pem`; import via
+  the console or `docker compose cp` + `docker compose exec`.
 
-It checks `nereidlink license status` and only generates/installs a default
-license when none exists, preserving any operator-installed license on reruns.
 The signed hand-off stays in `../.deployment/deploy-values/nereidlink/`, and
 deployment logs stay separately in `../.deployment/deploy-logs/nereidlink/`.
 Both directories are mode 0700 and their sensitive files are mode 0600.
 
-For a manual installation with the same merged configuration as the server:
+### Distroless constraints
 
-```bash
-nereidlink -c /etc/nereidlink/config.d license status
-nereidlink -c /etc/nereidlink/config.d license install \
-  --file deployment.license.json
-```
+The backend container image is distroless: it has no shell and no `tar`.
+
+- `kubectl exec -- sh`, `kubectl cp` and in-Pod shell sessions are impossible.
+  Direct binary exec works, but select the application Pod by its
+  `app.kubernetes.io/component=app` label — a bare `kubectl exec
+  deploy/nereidlink` can land on the NATS/PostgreSQL Pods, which share the
+  Deployment's name+instance labels and contain no `nereidlink` binary.
+- Manual CLI installation therefore runs a host-built `nereidlink` over a
+  temporary PostgreSQL port-forward using the merged ConfigMap/Secret
+  configuration, mirroring `post-deploy.sh`; the console upload or
+  `post-deploy.sh` itself is the recommended path.
+- On Compose, `docker compose exec <svc> nereidlink ...` invokes the binary
+  directly and works without a shell; modern Docker's `cp` is extracted by
+  the daemon and needs no `tar` inside the container.
 
 A deployment license uses `scope: "*"` and carries `tenant_cap` / a default
 device cap; a tenant license is scoped to a tenant UUID and carries that
