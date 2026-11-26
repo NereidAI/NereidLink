@@ -314,6 +314,36 @@ point costs nothing — there are no existing licenses to re-sign. Run steps
 1–2 on the offline signing host from the **repository root**; only the public
 key and the signed envelope ever leave it.
 
+Commands below use plain `kubectl`; on a k3s node whose default kubeconfig
+does not trust the cluster API CA, prefix every call with `sudo -n` (or
+`alias kubectl='sudo -n kubectl'`).
+
+#### 0. Pre-flight: confirm the read-only starting state
+
+Select the application Pod by its component label — never by
+`deploy/nereidlink`, whose selector also matches the NATS and PostgreSQL
+Pods:
+
+```bash
+POD=$(kubectl -n nereidlink get pod \
+  -l app.kubernetes.io/component=app \
+  -o jsonpath='{.items[0].metadata.name}')
+
+kubectl -n nereidlink exec "${POD}" -c nereidlink -- \
+  /usr/local/bin/nereidlink -c /etc/nereidlink/config.d license status
+```
+
+A fresh deployment returns:
+
+```json
+{"installed":false,"tenant_cap":0,"tenant_count":0,
+ "issued_at":"0001-01-01T00:00:00Z","expires_at":"0001-01-01T00:00:00Z",
+ "features":[],"read_only":true,"reason":"deployment license is not installed"}
+```
+
+This is the state the rest of the runbook removes. Keep this command handy;
+the same call is the final verification in step 6.
+
 #### 1. Generate a fresh Ed25519 key pair
 
 ```bash
