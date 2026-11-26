@@ -211,31 +211,95 @@ administrator password exactly once. There is no shipped default password.
 ## License
 
 A fresh deployment has no license and starts read-only (tenant/device creation
-blocked). Import a signed license either via **System -> License -> Import
-license** or with the CLI below.
+and new device connections are blocked; existing data stays readable). A
+compose deployment uses its own fresh Ed25519 key pair; since no license row
+exists yet, establishing the trust anchor now costs nothing.
 
-For first-time key generation, public-key export, license signing, and key
-rotation, follow the [license-sign guide](../../tools/license-sign/README.md).
-The signing private key is deliberately not included in Git or container images;
-if you received a signed license from the vendor, you do not need that key.
+The trust model is the same as on Kubernetes: the signing **private** key
+stays on the offline signing host (never in this Git-tracked directory, never
+in an image); only the **public** verification key and the signed envelope
+reach the deployment. The server has no private-key configuration.
 
-Compose verifies licenses with `../../configs/license/public.pem`, bind-mounted
-as `/etc/nereidlink/license/public.pem` and selected by
-`license.public_key_path` in `config.yaml`. A self-signed license must use the
-private key matching that public key.
+### 1. Generate the key pair and sign the license
 
-To import `deployment.license.json` created in the repository root by the
-license-sign guide, run from this directory:
+Follow the [license-sign guide](../../tools/license-sign/README.md) for key
+generation, public-key export and the full signing flags. In short, on the
+signing host, from the **repository root** (the `go run` and `.deployment`
+paths below assume that working directory; the state tree lives outside the
+repository so secrets can never be committed):
 
 ```bash
-docker compose cp ../../deployment.license.json \
+STATE_DIR=../.deployment/deploy-values/nereidlink/license
+PRIVATE_KEY="${STATE_DIR}/private/vendor-ed25519.pem"
+PUBLIC_KEY="${STATE_DIR}/public.pem"
+
+install -d -m 700 "$(dirname "${PRIVATE_KEY}")"
+test ! -e "${PRIVATE_KEY}"          # never overwrite an existing signing key
+openssl genpkey -algorithm Ed25519 -out "${PRIVATE_KEY}"
+chmod 600 "${PRIVATE_KEY}"
+openssl pkey -in "${PRIVATE_KEY}" -pubout -out "${PUBLIC_KEY}"
+
+go run ./tools/license-sign \
+  --key "${PRIVATE_KEY}" \
+  --scope '*' --customer 'Your Customer' --years 10 \
+  --out "${STATE_DIR}/deployment.license.json"
+```
+
+If you received a signed license from the vendor, skip signing but still make
+sure its trust anchor is the public key mounted in step 2.
+
+### 2. Bind the public verification key
+
+The compose file bind-mounts `../../configs/license/public.pem` onto
+`/etc/nereidlink/license/public.pem` (read-only), selected by
+`license.public_key_path` in `config.yaml`. Put the new public key at that
+path (or edit the mount source), then recreate the service so it picks up the
+file:
+
+```bash
+head -1 ../../configs/license/public.pem   # must show: -----BEGIN PUBLIC KEY-----
+openssl pkey -in ../../configs/license/public.pem -pubin -noout   # must parse
+docker compose up -d nereidlink
+```
+
+A private PEM (`BEGIN PRIVATE KEY`) at this path makes public-key parsing fail
+at startup. Rotating the public key means every license must be re-signed by
+the matching private key.
+
+### 3. Import the license envelope
+
+Option A — **web console (recommended)**: **System -> License -> Import
+license**, upload `deployment.license.json`. No host/Docker access needed.
+
+Option B — **CLI**. The backend image is distroless (no shell); `docker
+compose exec` still works because it invokes the binary directly, and modern
+Docker's `cp` is untarred by the daemon and does not need a `tar` binary in
+the container. Run from this directory (the envelope path is relative to it):
+
+```bash
+docker compose cp \
+  ../../../.deployment/deploy-values/nereidlink/license/deployment.license.json \
   nereidlink:/tmp/deployment.license.json
 docker compose exec nereidlink \
   nereidlink -c /etc/nereidlink/config.yaml license install \
   --file /tmp/deployment.license.json
+```
+
+On Docker daemons old enough that `cp` fails on a distroless image, use the
+web console instead.
+
+### 4. Verify
+
+```bash
 docker compose exec nereidlink \
   nereidlink -c /etc/nereidlink/config.yaml license status
 ```
+
+Healthy output contains `"installed":true` and `"read_only":false`. In the
+console, **System -> License** shows **Installed** with the customer name and
+validity window, and the read-only banner is gone. Re-running the install
+flow is safe to skip once `installed` is true: an existing license is never
+overwritten by the idempotent tooling.
 
 ## Device MQTT access
 

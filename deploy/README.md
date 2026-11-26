@@ -287,54 +287,169 @@ forwards the suite roles in `X-User-Roles`; NL requires the secret
 ## License
 
 A fresh chart deployment has **no license row**, so it starts read-only
-(tenant and device creation are blocked). The standard `deploy.sh
-install|upgrade` path checks `nereidlink license status`, signs a default
-`scope="*"` license with the offline vendor key when none is installed, and
-imports it with `nereidlink license install`. It preserves any existing
-license on rerun. The application image is distroless, so the post-deploy
-script builds the current host CLI and uses a temporary PostgreSQL
-port-forward; the private key never enters the cluster or image.
+(tenant and device creation, and new device connections, are blocked;
+existing data stays readable and devices keep reporting). Importing a valid
+license restores full operation without recreating anything.
 
-For a manual/raw-Helm installation:
+### Trust model
 
-1. Sign a deployment license offline (the private key stays outside Git and must
-   never be shipped):
+Licensing is an offline Ed25519 signature flow, and the two keys never share
+a location:
 
-   ```bash
-   go run ./tools/license-sign \
-     --key ../.deployment/deploy-values/nereidlink/license/private/vendor-ed25519.pem \
-     --scope '*' --customer 'Your Customer' --years 10 \
-     --out deployment.license.json
-   ```
+| Key | Lives where | May enter the cluster? |
+|-----|-------------|------------------------|
+| Private signing key (`vendor-ed25519.pem`) | Offline/trusted host, outside Git, mode 0600 | **Never** — not in an image, not in a Secret, not mounted into any Pod |
+| Public verification key (`public.pem`) | Derived from the private key; baked into the image or supplied as a Secret | Yes — this is the only key material the server receives |
 
-2. Import it, either in the web console as the platform super administrator
-   (**System → License → Import license**; paste or choose the JSON file) or
-   with the supported CLI using the same merged configuration as the server:
+The server only verifies signatures: `internal/license` has no private-key
+configuration at all. A private key mounted into the cluster provides no
+functionality, and its exposure would let an attacker mint arbitrary
+licenses; treat any private key that ever enters a Secret as compromised.
 
-   ```bash
-   nereidlink -c /etc/nereidlink/config.d license status
-   nereidlink -c /etc/nereidlink/config.d license install \
-     --file deployment.license.json
-   ```
+### Kubernetes end-to-end runbook
 
-   `license status` emits JSON, including `installed`, expiry and gate state;
-   automation must not install a default license when `installed` is true.
+A Kubernetes deployment uses its own fresh key pair. Because a new
+deployment has no license row yet, establishing a new trust anchor at this
+point costs nothing — there are no existing licenses to re-sign. Run steps
+1–2 on the offline signing host from the **repository root**; only the public
+key and the signed envelope ever leave it.
 
-The server verifies the envelope with an Ed25519 **public** key. That key is
-baked at `/etc/nereidlink/license/public.pem` for zero-config use, but it can
-be rotated without rebuilding the image by supplying a Secret and setting
-`license.existingSecret`:
+#### 1. Generate a fresh Ed25519 key pair
 
 ```bash
+STATE_DIR=../.deployment/deploy-values/nereidlink/license
+PRIVATE_KEY="${STATE_DIR}/private/vendor-ed25519.pem"
+PUBLIC_KEY="${STATE_DIR}/public.pem"
+
+install -d -m 700 "$(dirname "${PRIVATE_KEY}")"
+test ! -e "${PRIVATE_KEY}"          # never overwrite an existing signing key
+openssl genpkey -algorithm Ed25519 -out "${PRIVATE_KEY}"
+chmod 600 "${PRIVATE_KEY}"
+openssl pkey -in "${PRIVATE_KEY}" -pubout -out "${PUBLIC_KEY}"
+```
+
+Back up the private key through your normal sealed-vault process. Losing it
+means no future license can be signed for this trust anchor.
+
+#### 2. Sign the deployment license with the private key
+
+```bash
+go run ./tools/license-sign \
+  --key "${PRIVATE_KEY}" \
+  --scope '*' --customer 'Your Customer' --years 10 \
+  --out "${STATE_DIR}/deployment.license.json"
+chmod 600 "${STATE_DIR}/deployment.license.json"
+```
+
+The envelope is JSON (`base64` payload plus a detached Ed25519 signature).
+See `tools/license-sign/README.md` for tenant-scope licenses and the full
+flag reference. The private key is used only here, on the signing host.
+
+#### 3. Bind the public key through a Secret and Helm
+
+Only the **public** key goes into the cluster. Validate the PEM header first,
+create the Secret (the chart's default Secret key is `public.pem`), then
+roll the chart:
+
+```bash
+head -1 "${PUBLIC_KEY}"    # must show: -----BEGIN PUBLIC KEY-----
+openssl pkey -in "${PUBLIC_KEY}" -pubin -noout   # must parse as a public key
+
 kubectl -n nereidlink create secret generic nereidlink-license-key \
-  --from-file=public.pem=configs/license/public.pem
+  --from-file=public.pem="${PUBLIC_KEY}"
+
+# --reuse-values keeps every other release setting when values are passed ad
+# hoc; values-file based releases can pass license.existingSecret there instead.
 helm upgrade nereidlink deploy/kubernetes/helm/nereidlink -n nereidlink \
+  --reuse-values \
   --set license.existingSecret=nereidlink-license-key
 ```
 
+The chart mounts this file read-only at
+`/etc/nereidlink/license/public.pem`, shadowing the baked key. A Secret that
+accidentally contains `BEGIN PRIVATE KEY` material makes the server's
+public-key parse fail at startup and sends the Pod into CrashLoopBackOff.
+
+#### 4. Verify the binding before importing anything
+
+```bash
+# Rollout completes and the new Pod is stable (no CrashLoopBackOff).
+kubectl -n nereidlink rollout status deployment/nereidlink
+
+# The mount is wired to the Secret, read-only.
+kubectl -n nereidlink get deployment nereidlink -o go-template \
+  '{{range (index .spec.template.spec.containers 0).volumeMounts}}{{if eq .name "license-key"}}{{.mountPath}} ro={{.readOnly}}{{"\n"}}{{end}}{{end}}'
+
+# Fingerprints of the local public key and the Secret content must match.
+openssl pkey -in "${PUBLIC_KEY}" -pubin -pubout -outform DER | sha256sum
+kubectl -n nereidlink get secret nereidlink-license-key \
+  -o go-template='{{index .data "public.pem"}}' | base64 -d \
+  | openssl pkey -pubin -pubout -outform DER | sha256sum
+```
+
+A successful `license status` call (step 6) is the final proof that the
+mounted key parsed; on k3s prefix `kubectl` with `sudo -n` as usual.
+
+#### 5. Import the license envelope
+
+Prefer the console: log in as the platform super administrator, open
+**System → License → Import license**, and upload
+`deployment.license.json` (paste the JSON or choose the file). The envelope
+travels over the authenticated API — no node access, `exec` or file copy is
+needed. The upload endpoint accepts deployment-scope licenses only.
+
+Alternative supported paths:
+
+- **Idempotent automation:** `deploy/kubernetes/scripts/deploy.sh
+  post-deploy` waits for the rollout, checks status, and signs/installs a
+  default license only when none exists, preserving any license already
+  installed.
+- **Manual CLI:** the backend image is distroless — no shell, no `tar` — so
+  `kubectl exec -- sh`, `kubectl cp` and in-Pod shell commands do not exist.
+  Run a host-built `nereidlink` binary against a temporary PostgreSQL
+  port-forward with the same merged ConfigMap/Secret configuration as the
+  server, exactly as `post-deploy.sh` does (it builds `config.d`, rewrites
+  the DSN to `127.0.0.1:<port>` and points `clock_file` at a host-writable
+  path). Tenant-scope licenses can only be installed via this path.
+
+#### 6. Confirm success in the UI
+
+**System → License** must show **Installed** with the customer name, issue
+and expiry dates, and no read-only banner; tenant/device creation works
+again. The equivalent CLI check must return `"installed":true` with
+`"read_only":false`:
+
+```bash
+# Select the app Pod by its component label. A bare "kubectl exec
+# deploy/nereidlink" also matches the NATS and PostgreSQL Pods (they share
+# the name+instance labels) and fails with
+# "stat /usr/local/bin/nereidlink: no such file or directory" on those.
+POD=$(kubectl -n nereidlink get pod \
+  -l app.kubernetes.io/component=app \
+  -o jsonpath='{.items[0].metadata.name}')
+
+kubectl -n nereidlink exec "${POD}" -c nereidlink -- \
+  /usr/local/bin/nereidlink -c /etc/nereidlink/config.d license status
+```
+
+Example healthy output:
+
+```json
+{"installed":true,"customer_name":"Your Customer","tenant_count":1,
+ "issued_at":"...","expires_at":"...","features":[],"read_only":false}
+```
+
+`read_only:true` plus a `reason` field explains a degraded state (for
+example `"deployment license is not installed"`). Automation must treat
+`installed:true` as "leave the existing license untouched".
+
+### License scope
+
 A deployment-scope license (`scope: "*"`) gates tenant count; a tenant-scope
-license gates that tenant's device count. The administrator upload endpoint
-accepts deployment scope only; install a tenant license via the CLI.
+license gates that tenant's device count. Expiry, over-cap and clock-rollback
+conditions all degrade the affected scope to read-only rather than stopping
+the process. If the public key is rotated after licenses already exist, every
+affected license must be re-signed by the matching private key.
 
 ## Single host
 
