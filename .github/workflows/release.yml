@@ -36,9 +36,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       build_date: ${{ steps.meta.outputs.build_date }}
+      app_version: ${{ steps.meta.outputs.app_version }}
     steps:
       - id: meta
-        run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          # Bare SemVer for the frontend sidebar footer stamp: v0.0.1 -> 0.0.1.
+          echo "app_version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
   release-backend:
     name: Build and publish backend image
@@ -65,6 +69,9 @@ jobs:
       build-args: |
         GIT_SHA=${{ github.sha }}
         BUILD_DATE=${{ needs.prep.outputs.build_date }}
+        # Footer stamp; the reusable workflow's own VERSION injection still
+        # drives the OCI labels independently.
+        VITE_APP_VERSION=${{ needs.prep.outputs.app_version }}
 
   release-chart:
     name: Publish Helm chart

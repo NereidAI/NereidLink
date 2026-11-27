@@ -8,9 +8,12 @@ import { fileURLToPath } from "node:url";
 // https://vitejs.dev/config/
 export default defineConfig({
   define: {
-    // Expose the package version to the sidebar footer at build time.
+    // Sidebar footer identity, baked at build time. Image builds inject the
+    // immutable VITE_APP_VERSION (dev channel: 0.0.0-dev-<short-sha>,
+    // releases: bare SemVer) via the Dockerfile; local npm builds fall back
+    // to the package version so `npm run dev` still shows a real label.
     "import.meta.env.VITE_APP_VERSION": JSON.stringify(
-      process.env.npm_package_version ?? "dev",
+      process.env.VITE_APP_VERSION ?? process.env.npm_package_version ?? "dev",
     ),
   },
   plugins: [react()],
