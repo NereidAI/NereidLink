@@ -16,7 +16,9 @@ description: |
   as a ConfigMap with a Secret overlay, runs schema migrations through an
   init container, and exposes the HTTP/WS API and the MQTT listener.
 type: application
-# Tracked sources stay on the rolling-dev placeholder. Release and immutable
-# development packages inject both versions via helm package.
+# Tracked sources stay on the rolling 0.0.0-dev identity for both fields.
+# Development packages keep this identity (the floating OCI tag moves to each
+# new manifest); only a protected v* release injects bare SemVer via helm
+# package.
 version: "0.0.0-dev"
 appVersion: "0.0.0-dev"
