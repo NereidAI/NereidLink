@@ -16,7 +16,8 @@
     "check": "npm run check:help && npm run check:i18n",
     "test:inference": "node --experimental-strip-types scripts/test-inference-binding.mjs",
     "test:shadow": "node --experimental-strip-types scripts/test-shadow-events.mjs",
-    "test:business": "node --experimental-strip-types scripts/test-business-resources.mjs"
+    "test:business": "node --experimental-strip-types scripts/test-business-resources.mjs",
+    "test:version": "node --experimental-strip-types scripts/test-version.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.1",

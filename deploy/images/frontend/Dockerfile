@@ -29,9 +29,8 @@ ARG NGINX_BASE=nginx:alpine
 # Stage 1: build the architecture-neutral Vite bundle once on the native
 # builder; the same output is shared by every target platform.
 FROM --platform=$BUILDPLATFORM ${NODE_BASE} AS build
-# VERSION is consumed by the CI/release build-arg contract; the static Vite
-# bundle itself is architecture-neutral and does not embed it today. The
-# default is the rolling dev channel; release builds inject bare SemVer.
+# VERSION is consumed by the CI/release build-arg contract. The default is
+# the rolling dev channel; release builds inject bare SemVer.
 ARG VERSION=0.0.0-dev
 # Regional npm registry injected at build time (treaty §17); empty keeps the
 # official npm default registry.
@@ -41,6 +40,15 @@ COPY web/package.json web/package-lock.json* ./
 RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi \
     && (npm ci || npm install)
 COPY web/ ./
+# VITE_APP_VERSION is the identity baked into the static bundle's sidebar
+# footer (dev channel: 0.0.0-dev-<short-sha>, releases: bare SemVer); it
+# defaults to VERSION so a caller that only passes VERSION still gets a
+# coherent footer. It is declared after the dependency layer because the dev
+# value changes on every commit: placing it here keeps the npm ci layer cached
+# and re-runs only the Vite build. Vite reads process.env at build time, so
+# ENV promotes the ARG into the environment of the RUN step below.
+ARG VITE_APP_VERSION=${VERSION}
+ENV VITE_APP_VERSION=${VITE_APP_VERSION}
 RUN npm run build
 
 # Stage 2: static nginx runtime. No proxy_pass anywhere: the Ingress path

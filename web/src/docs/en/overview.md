@@ -24,4 +24,4 @@ The first load is a single REST snapshot. After that, values update through one 
 
 ## Console navigation
 
-The left navigation scrolls independently when its entries exceed the available height. The version footer remains at the bottom of the sidebar, including when the navigation is collapsed.
+The left navigation scrolls independently when its entries exceed the available height. The version footer remains at the bottom of the sidebar, including when the navigation is collapsed. Dev builds display the rolling version with its short git commit (for example `0.0.0-dev-a1b2c3d`); release builds display the bare SemVer tag (for example `0.0.1`).

@@ -63,6 +63,7 @@ import HelpDrawer from "../help/HelpDrawer";
 import { logout } from "../api/auth";
 import { authStore } from "../store/authStore";
 import { useWSStore } from "../store/wsStore";
+import { footerVersion } from "../utils/version";
 
 const { Sider, Header, Content } = AntLayout;
 
@@ -446,7 +447,8 @@ export default function AppLayout() {
           />
         </div>
 
-        {/* Footer with version */}
+        {/* Footer with version: dev images stamp 0.0.0-dev-<short-sha>,
+            release images stamp bare SemVer; the label hides when collapsed. */}
         <div
           style={{
             flex: "none",
@@ -457,16 +459,10 @@ export default function AppLayout() {
             textAlign: collapsed ? "center" : "left",
           }}
         >
-          {!collapsed && (
-            <Tooltip title="Version">
-              <Typography.Text type="secondary">v</Typography.Text>
-            </Tooltip>
-          )}
-          <Tooltip title={import.meta.env.VITE_APP_VERSION ?? "dev"}>
-            <Typography.Text type="secondary">
-              {import.meta.env.VITE_APP_VERSION ?? "dev"}
-            </Typography.Text>
-          </Tooltip>
+          {!collapsed && <span>{t("common.version")}: </span>}
+          <Typography.Text type="secondary" ellipsis>
+            {footerVersion(import.meta.env.VITE_APP_VERSION)}
+          </Typography.Text>
         </div>
       </Sider>
 
