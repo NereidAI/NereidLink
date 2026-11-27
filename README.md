@@ -183,11 +183,13 @@ modes, upgrades, MQTT access, license import and troubleshooting:
 Complete NereidForge first: NereidLink requires Forge SeaweedFS and its exact
 S3 credentials from the first installation. The public OCI chart provisions
 the backend and frontend Deployments, bundled PostgreSQL/TimescaleDB and NATS,
-Ingress path splitting and the MQTT NodePort services. The floating
-`0.0.0-dev` OCI tag aliases the latest successfully published immutable
-`0.0.0-dev-<short-sha>` chart manifest, whose `appVersion` selects both matching
-immutable application images. Use a verified formal version instead when one is
-published.
+Ingress path splitting and the MQTT NodePort services. `0.0.0-dev` is the
+single rolling development identity for the chart and both application
+images: each main-branch publication moves the tag to the new verified
+manifest, and the chart selects the floating `0.0.0-dev` images. Earlier
+`0.0.0-dev-<short-sha>` chart tags remain for reproducing historical
+snapshots, but new development builds no longer create per-commit chart
+tags. Use a verified formal version instead when one is published.
 
 ```bash
 export NEREIDLINK_VERSION=0.0.0-dev
@@ -209,10 +211,13 @@ kubectl -n nereidlink rollout status deploy/nereidlink --timeout=240s
 kubectl -n nereidlink rollout status deploy/nereidlink-frontend --timeout=240s
 ```
 
-Record the OCI digest and resolved chart version for each deployment. For
-deliberate reproduction, replace `NEREIDLINK_VERSION` with the resolved
-`0.0.0-dev-<short-sha>` snapshot instead of the floating selector. The chart
-selects both suite images at that immutable `appVersion`. Complete the one-time
+Record the OCI digest and resolved chart version for each deployment;
+pinning that digest reproduces a given floating-tag snapshot even after the
+tag moves. For historical builds, replace `NEREIDLINK_VERSION` with one of
+the retained `0.0.0-dev-<short-sha>` snapshots instead of the floating
+selector. The chart selects both suite images at the floating `0.0.0-dev`
+tags; the sidebar footer still displays the short-sha build label baked
+into the frontend image. Complete the one-time
 administrator bootstrap in the web UI and
 import site license material through the supported product interface; no
 vendor private key is part of chart installation. Chart values, external

@@ -1,13 +1,14 @@
 # Copyright (C) 2026 YIQISOFT
 # SPDX-License-Identifier: Apache-2.0
 
-# Rolling dev channel (root treaty §19). Every push to main publishes the
-# 0.0.0-dev floating tag and an immutable 0.0.0-dev-<sha> tag to GHCR for
-# each split image via the organization reusable workflow. Pull requests
-# deliberately do not trigger this, so forks cannot publish into the
-# organization namespace. Formal releases remain tag-only through
-# release.yml. Each caller passes the same gha cache-scope as its ci.yml
-# warm job and release.yml caller, byte-for-byte.
+# Rolling dev channel (root treaty §19). Every push to main publishes to
+# GHCR via the organization reusable workflows: each split image keeps its
+# floating 0.0.0-dev tag alongside its per-commit traceability tag, while the
+# development chart is published on the single floating 0.0.0-dev identity
+# (no per-commit chart tag). Pull requests deliberately do not trigger this,
+# so forks cannot publish into the organization namespace. Formal releases
+# remain tag-only through release.yml. Each caller passes the same gha
+# cache-scope as its ci.yml warm job and release.yml caller, byte-for-byte.
 name: Publish Dev Images
 
 on:
@@ -33,8 +34,12 @@ jobs:
       - id: meta
         run: |
           echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-          # Immutable dev identity with the 7-character short sha; baked into
-          # the frontend sidebar footer via VITE_APP_VERSION.
+          # Display-only build label with the 7-character short sha, baked
+          # into the frontend sidebar footer via VITE_APP_VERSION so a running
+          # dev build shows its source commit. It is not an OCI publication
+          # coordinate: the reusable image/chart workflows publish the
+          # floating 0.0.0-dev tags (plus per-commit image traceability tags),
+          # and the development chart selects only 0.0.0-dev.
           echo "immutable=0.0.0-dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
   publish-dev-backend:
